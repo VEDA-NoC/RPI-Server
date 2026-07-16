@@ -24,6 +24,9 @@
 - GitHub 원격: `VEDA-NoC/RPI-Server`
 - visibility: Public, 배치별 장치 정보와 credential은 Git 추적에서 제외
 - PR #1 run #2에서 format, cppcheck, x86_64 build, CLI smoke test 통과
+- PR #1 최종 run #3 통과 및 merge 완료
+- `main` protection: 세 check 필수, strict update, 승인 1명, stale review 취소
+- conversation resolution 필수, force-push/branch delete 금지, admin bypass 허용
 
 ## Formatting
 

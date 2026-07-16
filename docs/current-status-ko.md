@@ -75,7 +75,9 @@ DB recording_segments.channel_id=1
 
 - run #1: format/build 성공, cppcheck performance 경고 2건으로 실패
 - `trim_copy` 불필요 복사와 test client의 불필요한 `substr` 대입 수정
-- run #2: clang-format 19, cppcheck, x86_64 CMake build, CLI smoke test 모두 성공
+- run #2와 최종 문서 반영 run #3: clang-format 19, cppcheck, x86_64 CMake build,
+  CLI smoke test 모두 성공
+- PR #1 merge 완료
 - Raspberry Pi, camera, USB storage 시험은 CI에 포함하지 않음
 
 ## 시간 동기화 상태
@@ -195,7 +197,9 @@ Git repository=initialized at outputs/rpi-vms
 GitHub repository=VEDA-NoC/RPI-Server
 GitHub visibility=public
 GitHub Actions=format, cppcheck, x86_64 build, CLI smoke test
-GitHub Actions execution=run #2 passed on PR #1
+GitHub Actions execution=run #3 passed and PR #1 merged
+main protection=3 required checks, strict update, 1 approval, stale review dismissal
+main protection=conversation resolution required, force push/delete disabled, admin bypass allowed
 GitHub Codex connector=connected as Vlolet with repository admin/push access
 Confluence connector=not configured yet
 ```
