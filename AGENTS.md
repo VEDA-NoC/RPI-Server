@@ -12,3 +12,6 @@
 - Apply the repository `.clang-format` only to modified C/C++ files, except in an explicit formatting-only commit.
 - Treat Raspberry Pi camera, USB, and network checks as hardware integration tests; x86 CI does not replace them.
 - After edits, report changed files, deployment steps, exact build/test commands, expected output, failure logs, and unverified items.
+- End every completed task with the current state, exactly one recommended next task, and who acts next.
+- Do not stop at "no further user testing is required." When roadmap work remains, select the next item and state whether the agent continues now or the user must open a new task.
+- If a new task is required, provide its exact title and starter message. If the user has nothing to do, state `사용자 행동 없음` and name the next agent action.
