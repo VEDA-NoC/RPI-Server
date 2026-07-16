@@ -22,7 +22,8 @@
 - jobs: format, cppcheck, CMake build 및 CLI smoke test
 - Raspberry Pi hardware test와 deploy job: 미구현
 - GitHub 원격: `VEDA-NoC/RPI-Server`
-- 원격이 Public으로 확인되어 Private 전환 전까지 최초 push 보류
+- visibility: Public, 배치별 장치 정보와 credential은 Git 추적에서 제외
+- PR #1 run #2에서 format, cppcheck, x86_64 build, CLI smoke test 통과
 
 ## Formatting
 
