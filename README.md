@@ -89,6 +89,32 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
+## Raspberry Pi Synchronization
+
+Run the deployment sync from WSL. The Windows repository remains the source of
+truth, and the Raspberry Pi remains the native build and hardware-test target.
+
+```bash
+cd /mnt/c/Users/shini/Documents/Codex/2026-07-10/rtsps-codex-hanwha-rtsp-raspberry-pi/outputs/rpi-vms
+
+# Inspect the changes first.
+bash tools/sync-to-pi.sh --dry-run
+
+# Synchronize source and run the native Pi build.
+bash tools/sync-to-pi.sh --build
+```
+
+The script excludes `.git`, `.github`, recordings, SQLite databases,
+credentials, the local environment document, and build directories. Use clean
+mode only when stale files in `/home/noc/rpi-vms` should be removed:
+
+```bash
+bash tools/sync-to-pi.sh --clean --build
+```
+
+Clean mode protects the existing Pi `app`, `.env`, `certs/`, and
+`docs/current-environment-local-ko.md`.
+
 The Makefile output is:
 
 ```text

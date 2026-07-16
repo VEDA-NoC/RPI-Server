@@ -69,6 +69,19 @@ DB recording_segments.channel_id=1
 약 9~10초였다. 실행 직후 너무 빨리 종료한 시험에서 생성된 0~1초 파일은 정상
 장시간 녹화 판정에서 제외한다.
 
+2026-07-16 Public 저장소 정리 이후 Pi 재시험:
+
+- `make clean && make` ARM64 native build 성공
+- camera host 없이 실행할 때 `error: --camera-host is required`, exit code 1 확인
+- ext4 mount에서 35초 녹화 및 MP4 segment 2개 종료 처리 성공
+- pipeline 로그의 RTSP userinfo가 `rtsp://<redacted>@...`로 마스킹됨
+- 파일 크기 약 3.6MB, 1.0MB
+- `.github`는 Pi runtime에 필요하지 않으며 sync script에서 제외
+- `tools/sync-to-pi.sh --build`로 실제 source 동기화와 ARM64 재빌드 성공
+- 원격 확인 결과 `.github` 없음, 실행 가능한 `app` 존재
+- `--dry-run --clean`에서 `app`은 보호되고 구형 문서 3개만 삭제 예정으로 표시
+- 실제 `--clean` 삭제는 아직 실행하지 않음
+
 ### GitHub Actions
 
 2026-07-16 PR #1에서 초기 CI를 검증했다.
@@ -205,4 +218,6 @@ Confluence connector=not configured yet
 ```
 
 현재 개발 루프는 Windows source를 `rsync`로 Pi의 `~/rpi-vms`에 반영하고 Pi에서
-native build 및 camera/USB 시험을 수행하는 방식이다.
+native build 및 camera/USB 시험을 수행하는 방식이다. `tools/sync-to-pi.sh`가
+`.git`, `.github`, runtime data, credential과 로컬 환경 문서를 제외하며
+`--dry-run`, `--clean`, `--build` 모드를 제공한다.
