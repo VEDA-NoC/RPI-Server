@@ -200,7 +200,7 @@ std::string find_session(const std::string& header) {
             value = value.substr(first);
             const size_t semicolon = value.find(';');
             if (semicolon != std::string::npos) {
-                value = value.substr(0, semicolon);
+                value.resize(semicolon);
             }
             return value;
         }
