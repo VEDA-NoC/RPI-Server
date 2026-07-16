@@ -138,6 +138,15 @@ AppConfig parse_args(int argc, char** argv) {
         } else
             throw std::runtime_error("unknown option: " + arg);
     }
+    if (cfg.camera_host.empty()) {
+        throw std::runtime_error("--camera-host is required");
+    }
+    if (cfg.camera_user.empty()) {
+        throw std::runtime_error("--camera-user is required");
+    }
+    if (cfg.camera_password.empty()) {
+        throw std::runtime_error("--camera-password is required");
+    }
     return cfg;
 }
 

@@ -25,10 +25,10 @@ index/
 certs/
 *.key
 *.pem
+docs/current-environment-local-ko.md
 
 # Editor and OS files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
-

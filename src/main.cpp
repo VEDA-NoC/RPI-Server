@@ -21,7 +21,7 @@ std::atomic<bool> g_running{true};
 void handle_shutdown_signal(int) { g_running.store(false); }
 
 struct VmsConfig {
-    std::string camera_host = "CAMERA_IP";
+    std::string camera_host;
     int camera_port = 554;
     std::string camera_user = "admin";
     std::string camera_password;

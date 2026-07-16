@@ -2,6 +2,7 @@
 
 - Default communication language is Korean.
 - Read `docs/current-status-ko.md` and `docs/vms-development-roadmap-ko.md` before implementation.
+- When present, read the ignored `docs/current-environment-local-ko.md` for deployment-specific hardware and network details.
 - Camera channels are `0..3`; VMS, DB, client, and storage channel IDs are `1..4`.
 - Store DB, log, and protocol timestamps in UTC. Use a monotonic clock for latency inside one device.
 - Keep camera ingest independent from client sessions. Do not transcode recording or live streams by default.

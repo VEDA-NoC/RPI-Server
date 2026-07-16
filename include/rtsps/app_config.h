@@ -18,7 +18,7 @@ struct AppConfig {
     std::string cert_file = "certs/server.crt";
     std::string key_file = "certs/server.key";
 
-    std::string camera_host = "CAMERA_IP";
+    std::string camera_host;
     int camera_port = 554;
     std::string camera_user = "admin";
     std::string camera_password;

@@ -27,6 +27,32 @@ std::string quote_for_gst_parse(const std::string& value) {
     return out;
 }
 
+std::string redact_rtsp_userinfo(std::string text) {
+    constexpr const char* schemes[] = {"rtsp://", "rtsps://"};
+    for (const char* scheme : schemes) {
+        const std::string scheme_text(scheme);
+        std::size_t search_from = 0;
+        while (true) {
+            const std::size_t scheme_pos = text.find(scheme_text, search_from);
+            if (scheme_pos == std::string::npos) {
+                break;
+            }
+
+            const std::size_t userinfo_start = scheme_pos + scheme_text.size();
+            const std::size_t authority_end = text.find_first_of("/ \t\r\n\"", userinfo_start);
+            const std::size_t separator = text.find('@', userinfo_start);
+            if (separator != std::string::npos && (authority_end == std::string::npos || separator < authority_end)) {
+                constexpr const char* replacement = "<redacted>";
+                text.replace(userinfo_start, separator - userinfo_start, replacement);
+                search_from = userinfo_start + std::char_traits<char>::length(replacement) + 1;
+            } else {
+                search_from = userinfo_start;
+            }
+        }
+    }
+    return text;
+}
+
 void handle_element_message(GstMessage* message, RecordingIndex& index, int channel_id, const std::string& codec,
                             Logger& logger) {
     const GstStructure* structure = gst_message_get_structure(message);
@@ -98,7 +124,7 @@ int GStreamerRecorder::run() {
 
     GError* error = nullptr;
     const std::string pipeline_description = build_pipeline();
-    logger_.info("[gst] pipeline: " + pipeline_description);
+    logger_.info("[gst] pipeline: " + redact_rtsp_userinfo(pipeline_description));
 
     GstElement* pipeline = gst_parse_launch(pipeline_description.c_str(), &error);
     if (!pipeline) {
@@ -106,7 +132,7 @@ int GStreamerRecorder::run() {
         if (error) {
             g_error_free(error);
         }
-        throw std::runtime_error("failed to create pipeline: " + message);
+        throw std::runtime_error(redact_rtsp_userinfo("failed to create pipeline: " + message));
     }
 
     GstBus* bus = gst_element_get_bus(pipeline);
@@ -128,9 +154,10 @@ int GStreamerRecorder::run() {
                 GError* gst_error = nullptr;
                 gchar* debug = nullptr;
                 gst_message_parse_error(message, &gst_error, &debug);
-                logger_.error(std::string("[gst] error: ") + (gst_error ? gst_error->message : "unknown"));
+                logger_.error(
+                    redact_rtsp_userinfo(std::string("[gst] error: ") + (gst_error ? gst_error->message : "unknown")));
                 if (debug) {
-                    logger_.debug(std::string("[gst] debug: ") + debug);
+                    logger_.debug(redact_rtsp_userinfo(std::string("[gst] debug: ") + debug));
                 }
                 if (gst_error) {
                     g_error_free(gst_error);
