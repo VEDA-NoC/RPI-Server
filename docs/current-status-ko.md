@@ -186,7 +186,7 @@ Git repository=initialized at outputs/rpi-vms
 GitHub repository=VEDA-NoC/RPI-Server
 GitHub visibility=public
 GitHub Actions=format, cppcheck, x86_64 build, CLI smoke test
-GitHub Actions execution=not run yet
+GitHub Actions execution=initial pull request validation pending
 GitHub Codex connector=connected as Vlolet with repository admin/push access
 Confluence connector=not configured yet
 ```
