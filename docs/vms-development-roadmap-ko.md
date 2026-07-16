@@ -16,11 +16,13 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 
 ### M1. 시간 동기화와 지연 계측
 
-1. 카메라, Raspberry Pi, Windows가 같은 NTP 기준을 사용하게 한다.
-2. 저장/로그/프로토콜 시각은 UTC로 통일한다.
-3. 같은 장치 내부 구간 측정에는 monotonic clock을 사용한다.
-4. Qt에서 packet receive, decode complete, GUI render 시각을 분리한다.
-5. 카메라 직접 연결, 기존 RTSPS proxy, 새 VMS live 경로를 같은 조건으로 비교한다.
+1. 카메라, Raspberry Pi, Windows의 현재 시간 상태와 공통 NTP 기준 offset을
+   read-only 도구로 수집한다.
+2. 수집 결과를 검토한 뒤 세 장치가 같은 NTP 기준을 사용하게 한다.
+3. 저장/로그/프로토콜 시각은 UTC로 통일한다.
+4. 같은 장치 내부 구간 측정에는 monotonic clock을 사용한다.
+5. Qt에서 packet receive, decode complete, GUI render 시각을 분리한다.
+6. 카메라 직접 연결, 기존 RTSPS proxy, 새 VMS live 경로를 같은 조건으로 비교한다.
 
 완료 조건:
 
@@ -84,8 +86,8 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 
 ## 바로 다음 작업
 
-1. Pi/Windows/camera clock 상태를 측정한다.
+1. `tools/measure_time_offsets.py`를 실제 Pi/Windows/camera 환경에서 실행하고
+   공통 NTP 기준과 camera `SyncType` 변경안을 결정한다.
 2. Qt `StreamWorker`의 단계별 monotonic timestamp 구조를 설계한다.
 3. Qt에 packet-to-decode, decode-to-GUI, GUI queue p50/p95를 추가한다.
 4. 그 다음 단일 채널 `ChannelIngest`로 recorder 구조를 바꾼다.
-

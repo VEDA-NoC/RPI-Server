@@ -20,6 +20,7 @@ Design notes:
 docs/current-status-ko.md
 docs/sunapi-event-recording.md
 docs/latency-measurement-ko.md
+docs/time-offset-measurement-ko.md
 docs/vms-development-roadmap-ko.md
 docs/new-task-prompt-ko.md
 docs/git-ci-plan-ko.md
@@ -126,6 +127,25 @@ The CMake output is:
 ```text
 build/rpi_vms
 ```
+
+## Read-only Clock Measurement
+
+M1-A provides a standard-library Python tool that collects Windows, Raspberry Pi,
+and Hanwha camera clock state without changing time settings. Synchronize the
+repository to the Pi first, then run from Windows PowerShell:
+
+```powershell
+py -3 tools/measure_time_offsets.py `
+  --camera-host CAMERA_IP `
+  --camera-user admin `
+  --pi-target noc@noc `
+  --ntp-server COMMON_NTP_SERVER_OR_IP `
+  --samples 7
+```
+
+The SUNAPI password is entered interactively and is not written to the command
+line or result file. See `docs/time-offset-measurement-ko.md` for offset signs,
+uncertainty, and failure diagnostics.
 
 ## Run
 

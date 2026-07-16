@@ -83,3 +83,6 @@ jobs:
 
       - name: Run CLI smoke test
         run: ./build/rpi_vms --help
+
+      - name: Test time offset measurement tool
+        run: python3 -m unittest tools/test_measure_time_offsets.py

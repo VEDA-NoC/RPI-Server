@@ -31,6 +31,17 @@ curl --digest -u admin -H 'Accept: application/json' \
 않는다. 응답에서 `NTPURLList`, `UTCTime`, `LocalTime`, `SyncType`와 모델별
 `NTPStatus`, `NTPLastUpdatedTime`을 기록한다.
 
+M1-A의 read-only 수집과 공통 NTP offset 측정은 다음 도구와 절차를 사용한다.
+
+```text
+tools/measure_time_offsets.py
+docs/time-offset-measurement-ko.md
+```
+
+NTP 표본의 offset은 `reference - local`, 최종 장치 간 offset은
+`left clock - right clock`으로 기록한다. SUNAPI `UTCTime`의 초 단위 해상도 때문에
+카메라 상대 offset에는 기본 ±500ms 불확실성이 있음을 함께 기록한다.
+
 ## 측정 구간
 
 ```text
