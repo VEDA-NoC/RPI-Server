@@ -1,11 +1,11 @@
 #include "rtsps/recording_index.h"
 
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
-#include <ctime>
 #include <utility>
 
 namespace rtsps {
@@ -19,8 +19,7 @@ void check_sqlite(int rc, sqlite3* db, const std::string& action) {
 
 }  // namespace
 
-RecordingIndex::RecordingIndex(std::string db_path, Logger& logger)
-    : db_path_(std::move(db_path)), logger_(logger) {}
+RecordingIndex::RecordingIndex(std::string db_path, Logger& logger) : db_path_(std::move(db_path)), logger_(logger) {}
 
 RecordingIndex::~RecordingIndex() {
     if (db_) {

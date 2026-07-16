@@ -8,9 +8,7 @@
 namespace rtsps {
 
 std::string lower_copy(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
@@ -97,9 +95,8 @@ int content_length_from_header(const std::string& header) {
             continue;
         }
         std::string value = trim_copy(line.substr(std::string("Content-Length:").size()));
-        if (value.empty() || !std::all_of(value.begin(), value.end(), [](unsigned char c) {
-                return std::isdigit(c);
-            })) {
+        if (value.empty() ||
+            !std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c); })) {
             return -1;
         }
         try {
@@ -138,14 +135,13 @@ std::string extract_request_target(const std::string& message) {
 namespace {
 
 bool starts_with_at(const std::string& s, std::size_t pos, const std::string& prefix) {
-    return pos <= s.size() && s.size() - pos >= prefix.size() &&
-           s.compare(pos, prefix.size(), prefix) == 0;
+    return pos <= s.size() && s.size() - pos >= prefix.size() && s.compare(pos, prefix.size(), prefix) == 0;
 }
 
 bool is_rtsp_message_start_at(const std::string& s, std::size_t pos) {
-    static const std::vector<std::string> prefixes = {
-        "RTSP/", "OPTIONS ", "DESCRIBE ", "SETUP ", "PLAY ", "PAUSE ",
-        "TEARDOWN ", "GET_PARAMETER ", "SET_PARAMETER ", "ANNOUNCE ", "RECORD "};
+    static const std::vector<std::string> prefixes = {"RTSP/",          "OPTIONS ",  "DESCRIBE ", "SETUP ",
+                                                      "PLAY ",          "PAUSE ",    "TEARDOWN ", "GET_PARAMETER ",
+                                                      "SET_PARAMETER ", "ANNOUNCE ", "RECORD "};
     for (const auto& prefix : prefixes) {
         if (starts_with_at(s, pos, prefix)) {
             return true;
@@ -177,8 +173,8 @@ bool resync_message_buffer(std::string& buffer, const ParserLimits& limits) {
 
 }  // namespace
 
-bool extract_one_rtsp_message(std::string& buffer, std::string& message,
-                              const std::string& source, const ParserLimits& limits) {
+bool extract_one_rtsp_message(std::string& buffer, std::string& message, const std::string& source,
+                              const ParserLimits& limits) {
     (void)source;
     message.clear();
     while (!buffer.empty()) {
@@ -186,8 +182,7 @@ bool extract_one_rtsp_message(std::string& buffer, std::string& message,
             if (buffer.size() < 4) {
                 return false;
             }
-            const uint16_t len = (static_cast<unsigned char>(buffer[2]) << 8) |
-                                 static_cast<unsigned char>(buffer[3]);
+            const uint16_t len = (static_cast<unsigned char>(buffer[2]) << 8) | static_cast<unsigned char>(buffer[3]);
             const std::size_t total = 4 + len;
             if (buffer.size() < total) {
                 return false;
@@ -235,9 +230,7 @@ bool extract_one_rtsp_message(std::string& buffer, std::string& message,
     return false;
 }
 
-std::string cseq_from_message(const std::string& message) {
-    return header_value(message_header_part(message), "CSeq");
-}
+std::string cseq_from_message(const std::string& message) { return header_value(message_header_part(message), "CSeq"); }
 
 std::string method_or_status(const std::string& message) {
     const std::string first = get_first_line(message);
@@ -278,8 +271,7 @@ std::string rtsp_message_summary(const std::string& direction, const std::string
     if (!message.empty() && static_cast<unsigned char>(message[0]) == '$') {
         if (message.size() >= 4) {
             const int channel = static_cast<unsigned char>(message[1]);
-            const uint16_t len = (static_cast<unsigned char>(message[2]) << 8) |
-                                 static_cast<unsigned char>(message[3]);
+            const uint16_t len = (static_cast<unsigned char>(message[2]) << 8) | static_cast<unsigned char>(message[3]);
             out << direction << " RTP interleaved channel=" << channel << " payload_len=" << len;
         } else {
             out << direction << " RTP interleaved short message size=" << message.size();
@@ -289,10 +281,9 @@ std::string rtsp_message_summary(const std::string& direction, const std::string
 
     const int body_len = content_length_from_header(message_header_part(message));
     out << direction << " RTSP " << method_or_status(message) << " cseq=" << cseq_from_message(message)
-        << " header_bytes=" << message_header_part(message).size() << " body_bytes=" << body_len
-        << "\n" << sanitized_rtsp_for_log(message);
+        << " header_bytes=" << message_header_part(message).size() << " body_bytes=" << body_len << "\n"
+        << sanitized_rtsp_for_log(message);
     return out.str();
 }
 
 }  // namespace rtsps
-

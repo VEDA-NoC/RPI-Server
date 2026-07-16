@@ -33,8 +33,6 @@ TlsContext::~TlsContext() {
     }
 }
 
-SSL_CTX* TlsContext::get() const {
-    return ctx_;
-}
+SSL_CTX* TlsContext::get() const { return ctx_; }
 
 }  // namespace rtsps

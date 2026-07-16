@@ -1,10 +1,10 @@
 #include "rtsps/rtsp_rewriter.h"
 
-#include "rtsps/rtsp_message_parser.h"
-
 #include <cctype>
 #include <sstream>
 #include <utility>
+
+#include "rtsps/rtsp_message_parser.h"
 
 namespace rtsps {
 
@@ -41,9 +41,7 @@ RtspRewriter::RtspRewriter(const AppConfig& config, int channel, std::string pub
     upstream_base_ = oss.str();
 }
 
-const std::string& RtspRewriter::upstream_base() const {
-    return upstream_base_;
-}
+const std::string& RtspRewriter::upstream_base() const { return upstream_base_; }
 
 std::string RtspRewriter::make_camera_path(int channel) const {
     return replace_all(config_.camera_path_template, "{channel}", std::to_string(channel));

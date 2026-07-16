@@ -1,12 +1,12 @@
 #pragma once
 
-#include "rtsps/app_config.h"
-#include "rtsps/logger.h"
-#include "rtsps/tls_context.h"
-
 #include <atomic>
 #include <thread>
 #include <vector>
+
+#include "rtsps/app_config.h"
+#include "rtsps/logger.h"
+#include "rtsps/tls_context.h"
 
 namespace rtsps {
 

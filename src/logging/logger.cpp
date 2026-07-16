@@ -6,9 +6,7 @@ namespace rtsps {
 
 Logger::Logger(LogLevel level) : level_(level) {}
 
-bool Logger::enabled(LogLevel level) const {
-    return static_cast<int>(level) <= static_cast<int>(level_);
-}
+bool Logger::enabled(LogLevel level) const { return static_cast<int>(level) <= static_cast<int>(level_); }
 
 void Logger::log(LogLevel level, const std::string& message) const {
     if (!enabled(level)) {

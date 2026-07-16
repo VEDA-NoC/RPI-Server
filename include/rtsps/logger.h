@@ -1,9 +1,9 @@
 #pragma once
 
-#include "rtsps/app_config.h"
-
 #include <mutex>
 #include <string>
+
+#include "rtsps/app_config.h"
 
 namespace rtsps {
 

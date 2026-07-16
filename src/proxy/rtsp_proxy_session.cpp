@@ -1,20 +1,21 @@
 #include "rtsps/rtsp_proxy_session.h"
 
-#include "rtsps/digest_authenticator.h"
-#include "rtsps/rtsp_message_parser.h"
-#include "rtsps/rtsp_rewriter.h"
+#include <netdb.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <memory>
-#include <netdb.h>
 #include <stdexcept>
 #include <string>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <vector>
+
+#include "rtsps/digest_authenticator.h"
+#include "rtsps/rtsp_message_parser.h"
+#include "rtsps/rtsp_rewriter.h"
 
 namespace rtsps {
 namespace {
@@ -164,7 +165,7 @@ void RtspProxySession::run() {
                         goto done;
                     }
                     rewriter = std::make_unique<RtspRewriter>(config_, channel,
-                                                               extract_public_base_from_target(request_target, channel));
+                                                              extract_public_base_from_target(request_target, channel));
                     try {
                         camera_fd = connect_camera();
                     } catch (const std::exception& e) {
@@ -200,7 +201,8 @@ void RtspProxySession::run() {
                 if (message.empty() || static_cast<unsigned char>(message[0]) != '$') {
                     const int status = rtsp_status_code(message);
                     logger_.debug("[rtsp] camera -> proxy " + std::to_string(status));
-                    if (status == 401 && !last_upstream_request.empty() && authenticator.update_from_unauthorized(message)) {
+                    if (status == 401 && !last_upstream_request.empty() &&
+                        authenticator.update_from_unauthorized(message)) {
                         std::string retry = authenticator.authorize(last_upstream_request);
                         logger_.info("[auth] camera requested Digest auth; retrying RTSP request");
                         logger_.trace(rtsp_message_summary("[out] proxy -> camera", retry));
@@ -226,5 +228,3 @@ done:
 }
 
 }  // namespace rtsps
-
-

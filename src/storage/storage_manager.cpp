@@ -1,8 +1,9 @@
 #include "rtsps/storage_manager.h"
 
+#include <sys/stat.h>
+
 #include <filesystem>
 #include <fstream>
-#include <sys/stat.h>
 #include <utility>
 
 namespace rtsps {
@@ -19,8 +20,8 @@ bool is_mount_point(const std::filesystem::path& path) {
         return true;
     }
 
-    struct stat path_stat {};
-    struct stat parent_stat {};
+    struct stat path_stat{};
+    struct stat parent_stat{};
     if (::stat(canonical_path.c_str(), &path_stat) != 0) {
         return false;
     }
@@ -34,13 +35,20 @@ bool is_mount_point(const std::filesystem::path& path) {
 
 std::string to_string(StorageState state) {
     switch (state) {
-        case StorageState::Unconfigured: return "unconfigured";
-        case StorageState::Missing: return "missing";
-        case StorageState::Checking: return "checking";
-        case StorageState::Ready: return "ready";
-        case StorageState::ReadOnly: return "read_only";
-        case StorageState::Full: return "full";
-        case StorageState::Error: return "error";
+        case StorageState::Unconfigured:
+            return "unconfigured";
+        case StorageState::Missing:
+            return "missing";
+        case StorageState::Checking:
+            return "checking";
+        case StorageState::Ready:
+            return "ready";
+        case StorageState::ReadOnly:
+            return "read_only";
+        case StorageState::Full:
+            return "full";
+        case StorageState::Error:
+            return "error";
     }
     return "unknown";
 }
@@ -129,8 +137,6 @@ StorageStatus StorageManager::check() {
     return status;
 }
 
-const std::string& StorageManager::storage_root() const {
-    return storage_root_;
-}
+const std::string& StorageManager::storage_root() const { return storage_root_; }
 
 }  // namespace rtsps

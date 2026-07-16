@@ -1,10 +1,11 @@
 #pragma once
 
-#include "rtsps/logger.h"
+#include <sqlite3.h>
 
 #include <cstdint>
-#include <sqlite3.h>
 #include <string>
+
+#include "rtsps/logger.h"
 
 namespace rtsps {
 
@@ -34,4 +35,3 @@ private:
 };
 
 }  // namespace rtsps
-

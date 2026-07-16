@@ -1,11 +1,11 @@
 #pragma once
 
-#include "rtsps/logger.h"
-#include "rtsps/recording_index.h"
-
 #include <atomic>
 #include <cstdint>
 #include <string>
+
+#include "rtsps/logger.h"
+#include "rtsps/recording_index.h"
 
 namespace rtsps {
 

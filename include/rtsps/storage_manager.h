@@ -1,9 +1,9 @@
 #pragma once
 
-#include "rtsps/logger.h"
-
 #include <cstdint>
 #include <string>
+
+#include "rtsps/logger.h"
 
 namespace rtsps {
 

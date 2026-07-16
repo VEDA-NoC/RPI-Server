@@ -1,11 +1,12 @@
 #pragma once
 
-#include "rtsps/app_config.h"
-#include "rtsps/logger.h"
+#include <openssl/ssl.h>
 
 #include <atomic>
 #include <cstddef>
-#include <openssl/ssl.h>
+
+#include "rtsps/app_config.h"
+#include "rtsps/logger.h"
 
 namespace rtsps {
 
@@ -29,4 +30,3 @@ private:
 };
 
 }  // namespace rtsps
-

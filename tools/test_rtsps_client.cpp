@@ -8,8 +8,8 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -34,9 +34,7 @@ struct Response {
 };
 
 std::string lower_copy(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return s;
 }
 
@@ -148,8 +146,7 @@ void ssl_write_all(SSL* ssl, const std::string& data) {
 bool read_one_rtsp_response(SSL* ssl, std::string& buffer, Response& response) {
     while (true) {
         if (!buffer.empty() && static_cast<unsigned char>(buffer[0]) == '$') {
-            std::cerr << "[test] unexpected RTP before RTSP response, buffered="
-                      << buffer.size() << "\n";
+            std::cerr << "[test] unexpected RTP before RTSP response, buffered=" << buffer.size() << "\n";
             return false;
         }
 
@@ -167,8 +164,7 @@ bool read_one_rtsp_response(SSL* ssl, std::string& buffer, Response& response) {
                 std::string version;
                 iss >> version >> response.status;
                 std::cerr << "[test] response first line: " << first_line(header) << "\n";
-                std::cerr << "[test] response header bytes=" << header.size()
-                          << " body bytes=" << body_len
+                std::cerr << "[test] response header bytes=" << header.size() << " body bytes=" << body_len
                           << " remaining buffered=" << buffer.size() << "\n";
                 return true;
             }
@@ -178,8 +174,7 @@ bool read_one_rtsp_response(SSL* ssl, std::string& buffer, Response& response) {
         int n = SSL_read(ssl, temp, sizeof(temp));
         if (n <= 0) {
             const int err = SSL_get_error(ssl, n);
-            std::cerr << "[test] SSL_read failed err=" << err
-                      << " buffered=" << buffer.size() << "\n";
+            std::cerr << "[test] SSL_read failed err=" << err << " buffered=" << buffer.size() << "\n";
             ERR_print_errors_fp(stderr);
             throw std::runtime_error("SSL_read failed while waiting RTSP response");
         }
@@ -256,9 +251,7 @@ std::string make_control_url(const std::string& base, const std::string& control
     return base + "/" + control;
 }
 
-std::string make_request(const std::string& method,
-                         const std::string& url,
-                         int cseq,
+std::string make_request(const std::string& method, const std::string& url, int cseq,
                          const std::vector<std::string>& headers = {}) {
     std::ostringstream oss;
     oss << method << " " << url << " RTSP/1.0\r\n";
@@ -271,10 +264,7 @@ std::string make_request(const std::string& method,
     return oss.str();
 }
 
-Response send_request(SSL* ssl,
-                      std::string& buffer,
-                      const std::string& label,
-                      const std::string& request) {
+Response send_request(SSL* ssl, std::string& buffer, const std::string& label, const std::string& request) {
     std::cerr << "[test] sending " << label << ": " << first_line(request) << "\n";
     ssl_write_all(ssl, request);
     Response res;
@@ -312,8 +302,7 @@ void count_rtp_packets(SSL* ssl, std::string& buffer, int seconds, const std::st
         while (true) {
             if (buffer.size() >= 4 && static_cast<unsigned char>(buffer[0]) == '$') {
                 const uint16_t len =
-                    (static_cast<unsigned char>(buffer[2]) << 8) |
-                    static_cast<unsigned char>(buffer[3]);
+                    (static_cast<unsigned char>(buffer[2]) << 8) | static_cast<unsigned char>(buffer[3]);
                 const size_t total = 4 + len;
                 if (buffer.size() < total) {
                     break;
@@ -343,8 +332,7 @@ void count_rtp_packets(SSL* ssl, std::string& buffer, int seconds, const std::st
         }
 
         if (clock::now() >= next_report) {
-            std::cout << "RTP packets: " << packets
-                      << ", bytes: " << bytes
+            std::cout << "RTP packets: " << packets << ", bytes: " << bytes
                       << ", extra RTSP messages: " << rtsp_messages << "\n";
             next_report += report_every;
         }
@@ -376,14 +364,12 @@ void count_rtp_packets(SSL* ssl, std::string& buffer, int seconds, const std::st
             ERR_print_errors_fp(stderr);
             throw std::runtime_error("SSL_read failed while receiving RTP");
         }
-        std::cerr << "[test] RTP read bytes=" << n
-                  << " buffered_before_parse=" << buffer.size() << "\n";
+        std::cerr << "[test] RTP read bytes=" << n << " buffered_before_parse=" << buffer.size() << "\n";
         buffer.append(temp, static_cast<size_t>(n));
     }
 
-    std::cout << "FINAL RTP packets: " << packets
-              << ", bytes: " << bytes
-              << ", extra RTSP messages: " << rtsp_messages << "\n";
+    std::cout << "FINAL RTP packets: " << packets << ", bytes: " << bytes << ", extra RTSP messages: " << rtsp_messages
+              << "\n";
     if (dump) {
         dump.flush();
     }
@@ -393,8 +379,7 @@ void count_rtp_packets(SSL* ssl, std::string& buffer, int seconds, const std::st
 
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 4) {
-        std::cerr << "Usage: " << argv[0]
-                  << " rtsps://host:port/ch0 [seconds] [interleaved_dump.bin]\n";
+        std::cerr << "Usage: " << argv[0] << " rtsps://host:port/ch0 [seconds] [interleaved_dump.bin]\n";
         return 1;
     }
 
@@ -451,21 +436,18 @@ int main(int argc, char** argv) {
         std::string buffer;
         int cseq = 1;
 
-        send_request(ssl, buffer, "OPTIONS",
-                     make_request("OPTIONS", url.base, cseq++));
+        send_request(ssl, buffer, "OPTIONS", make_request("OPTIONS", url.base, cseq++));
 
-        Response describe = send_request(
-            ssl, buffer, "DESCRIBE",
-            make_request("DESCRIBE", url.base, cseq++, {"Accept: application/sdp"}));
+        Response describe = send_request(ssl, buffer, "DESCRIBE",
+                                         make_request("DESCRIBE", url.base, cseq++, {"Accept: application/sdp"}));
 
         std::string control = find_first_media_control(describe.body);
         std::string setup_url = make_control_url(url.base, control);
         std::cout << "SETUP URL: " << setup_url << "\n";
 
-        Response setup = send_request(
-            ssl, buffer, "SETUP",
-            make_request("SETUP", setup_url, cseq++,
-                         {"Transport: RTP/AVP/TCP;unicast;interleaved=0-1"}));
+        Response setup =
+            send_request(ssl, buffer, "SETUP",
+                         make_request("SETUP", setup_url, cseq++, {"Transport: RTP/AVP/TCP;unicast;interleaved=0-1"}));
 
         std::string session = find_session(setup.header);
         if (session.empty()) {
@@ -473,8 +455,7 @@ int main(int argc, char** argv) {
         }
         std::cout << "Session: " << session << "\n";
 
-        send_request(ssl, buffer, "PLAY",
-                     make_request("PLAY", url.base, cseq++, {"Session: " + session}));
+        send_request(ssl, buffer, "PLAY", make_request("PLAY", url.base, cseq++, {"Session: " + session}));
 
         count_rtp_packets(ssl, buffer, seconds, dump_path);
 

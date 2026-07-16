@@ -25,8 +25,8 @@ int rtsp_status_code(const std::string& message);
 std::string rtsp_method_from_request(const std::string& request);
 std::string extract_request_target(const std::string& message);
 
-bool extract_one_rtsp_message(std::string& buffer, std::string& message,
-                              const std::string& source, const ParserLimits& limits);
+bool extract_one_rtsp_message(std::string& buffer, std::string& message, const std::string& source,
+                              const ParserLimits& limits);
 
 std::string cseq_from_message(const std::string& message);
 std::string method_or_status(const std::string& message);

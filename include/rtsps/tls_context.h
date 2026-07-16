@@ -1,8 +1,8 @@
 #pragma once
 
-#include "rtsps/app_config.h"
-
 #include <openssl/ssl.h>
+
+#include "rtsps/app_config.h"
 
 namespace rtsps {
 

@@ -1,20 +1,20 @@
 #include "rtsps/rtsp_proxy_server.h"
 
-#include "rtsps/rtsp_proxy_session.h"
-
 #include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
 #include <netinet/in.h>
-#include <string>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <string>
 #include <utility>
+
+#include "rtsps/rtsp_proxy_session.h"
 
 namespace rtsps {
 
-RtspProxyServer::RtspProxyServer(AppConfig config, TlsContext& tls_context, Logger& logger,
-                                 std::atomic<bool>& running)
+RtspProxyServer::RtspProxyServer(AppConfig config, TlsContext& tls_context, Logger& logger, std::atomic<bool>& running)
     : config_(std::move(config)), tls_context_(tls_context), logger_(logger), running_(running) {}
 
 int RtspProxyServer::run() {
@@ -95,4 +95,3 @@ int RtspProxyServer::open_listen_socket() const {
 }
 
 }  // namespace rtsps
-

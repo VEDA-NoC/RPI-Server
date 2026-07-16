@@ -1,9 +1,9 @@
 #pragma once
 
-#include "rtsps/app_config.h"
-
 #include <cstdint>
 #include <string>
+
+#include "rtsps/app_config.h"
 
 namespace rtsps {
 

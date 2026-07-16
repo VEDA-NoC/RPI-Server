@@ -1,11 +1,12 @@
 #include "rtsps/digest_authenticator.h"
 
-#include "rtsps/rtsp_message_parser.h"
+#include <openssl/evp.h>
 
 #include <iomanip>
-#include <openssl/evp.h>
 #include <sstream>
 #include <stdexcept>
+
+#include "rtsps/rtsp_message_parser.h"
 
 namespace rtsps {
 namespace {
@@ -17,8 +18,7 @@ std::string md5_hex(const std::string& input) {
     if (!ctx) {
         throw std::runtime_error("EVP_MD_CTX_new() failed");
     }
-    if (EVP_DigestInit_ex(ctx, EVP_md5(), nullptr) != 1 ||
-        EVP_DigestUpdate(ctx, input.data(), input.size()) != 1 ||
+    if (EVP_DigestInit_ex(ctx, EVP_md5(), nullptr) != 1 || EVP_DigestUpdate(ctx, input.data(), input.size()) != 1 ||
         EVP_DigestFinal_ex(ctx, digest, &digest_len) != 1) {
         EVP_MD_CTX_free(ctx);
         throw std::runtime_error("MD5 digest failed");
@@ -105,9 +105,7 @@ std::string add_authorization_header(const std::string& request, const std::stri
 
 DigestAuthenticator::DigestAuthenticator(const AppConfig& config) : config_(config) {}
 
-bool DigestAuthenticator::has_challenge() const {
-    return challenge_.valid;
-}
+bool DigestAuthenticator::has_challenge() const { return challenge_.valid; }
 
 bool DigestAuthenticator::update_from_unauthorized(const std::string& response) {
     DigestChallenge parsed = parse_digest_challenge(response);

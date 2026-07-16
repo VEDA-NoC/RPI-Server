@@ -3,11 +3,11 @@
 #include <gst/gst.h>
 
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
-#include <ctime>
 #include <utility>
 
 namespace rtsps {
@@ -69,16 +69,20 @@ VideoCodec parse_video_codec(const std::string& value) {
 
 std::string to_gst_encoding_name(VideoCodec codec) {
     switch (codec) {
-        case VideoCodec::H264: return "H264";
-        case VideoCodec::H265: return "H265";
+        case VideoCodec::H264:
+            return "H264";
+        case VideoCodec::H265:
+            return "H265";
     }
     return "H264";
 }
 
 std::string to_codec_name(VideoCodec codec) {
     switch (codec) {
-        case VideoCodec::H264: return "h264";
-        case VideoCodec::H265: return "h265";
+        case VideoCodec::H264:
+            return "h264";
+        case VideoCodec::H265:
+            return "h265";
     }
     return "h264";
 }
@@ -111,10 +115,10 @@ int GStreamerRecorder::run() {
 
     int result = 0;
     while (running_.load()) {
-        GstMessage* message = gst_bus_timed_pop_filtered(
-            bus, 500 * GST_MSECOND,
-            static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_ELEMENT |
-                                        GST_MESSAGE_STATE_CHANGED));
+        GstMessage* message =
+            gst_bus_timed_pop_filtered(bus, 500 * GST_MSECOND,
+                                       static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS |
+                                                                   GST_MESSAGE_ELEMENT | GST_MESSAGE_STATE_CHANGED));
         if (!message) {
             continue;
         }
@@ -153,10 +157,9 @@ int GStreamerRecorder::run() {
 
     logger_.info("[gst] stopping pipeline");
     if (gst_element_send_event(pipeline, gst_event_new_eos())) {
-        GstMessage* eos_message =
-            gst_bus_timed_pop_filtered(bus, 10 * GST_SECOND,
-                                       static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR |
-                                                                   GST_MESSAGE_ELEMENT));
+        GstMessage* eos_message = gst_bus_timed_pop_filtered(
+            bus, 10 * GST_SECOND,
+            static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR | GST_MESSAGE_ELEMENT));
         while (eos_message) {
             if (GST_MESSAGE_TYPE(eos_message) == GST_MESSAGE_ELEMENT) {
                 handle_element_message(eos_message, index_, config_.channel_id, to_codec_name(config_.codec), logger_);
@@ -180,16 +183,16 @@ int GStreamerRecorder::run() {
 std::string GStreamerRecorder::build_pipeline() const {
     const std::string encoding = to_gst_encoding_name(config_.codec);
     const std::string depay = config_.codec == VideoCodec::H264 ? "rtph264depay" : "rtph265depay";
-    const std::string parse = config_.codec == VideoCodec::H264 ? "h264parse config-interval=-1"
-                                                                : "h265parse config-interval=-1";
+    const std::string parse =
+        config_.codec == VideoCodec::H264 ? "h264parse config-interval=-1" : "h265parse config-interval=-1";
     const std::string location = make_location_pattern();
     const std::int64_t segment_ns = config_.segment_seconds * 1000000000LL;
 
     std::ostringstream pipeline;
     pipeline << "rtspsrc location=" << quote_for_gst_parse(config_.rtsp_url)
              << " protocols=tcp latency=" << config_.latency_ms << " name=src "
-             << "src. ! application/x-rtp,media=video,encoding-name=" << encoding << " ! "
-             << depay << " ! " << parse << " ! "
+             << "src. ! application/x-rtp,media=video,encoding-name=" << encoding << " ! " << depay << " ! " << parse
+             << " ! "
              << "splitmuxsink async-finalize=true muxer-factory=mp4mux max-size-time=" << segment_ns
              << " location=" << quote_for_gst_parse(location);
     return pipeline.str();
