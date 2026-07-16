@@ -10,6 +10,12 @@ outputs/rpi-vms/docs/vms-development-roadmap-ko.md를 순서대로 읽어라.
 이미 실제 Raspberry Pi에서 통과한 작업을 다시 만들지 말고 현재 milestone에서
 이어가라. 이번 작업은 [작업 내용을 한 문장으로 작성]이다.
 
+실제 Git 저장소 루트는 outputs/rpi-vms다. 이미 Git 초기화, baseline commit,
+clang-format 19 전체 적용, GitHub Actions 추가가 끝났으므로 다시 수행하지 마라.
+작업 시작 시 git status와 최근 commit을 확인하고 feature branch에서 작업하라.
+GitHub 원격은 VEDA-NoC/RPI-Server이며 current-status-ko.md에 push/CI 결과가
+기록되어 있지 않으면 먼저 그 상태를 확인하라.
+
 기존 rpi-vms 구조와 기존 RTSPS proxy 코드를 먼저 조사하고 재사용하라.
 파일을 수정하면 반드시 다음을 마지막 응답에 포함하라.
 - 수정 파일 목록
@@ -68,4 +74,3 @@ Qt 프로젝트는 C:\Users\shini\Documents\QtProjects\qt_4ch_viewer다.
 - 단순 질문마다 새 task를 만들지 않는다.
 - 새 task를 시작할 때는 이전 대화 전체를 붙이지 말고 status와 설계 문서를 읽게 한다.
 - task 종료 전에 다음 task가 알아야 할 실제 결과를 status에 반영한다.
-

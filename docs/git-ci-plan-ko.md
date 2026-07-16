@@ -8,6 +8,22 @@
 권장 Git 저장소 루트는 독립 제품 폴더인 `outputs/rpi-vms`다. SUNAPI PDF와 `work`
 추출 파일은 저장소 밖의 참고 자료로 유지한다.
 
+## 현재 구현 상태
+
+2026-07-16 기준:
+
+- 로컬 Git 저장소 루트: `outputs/rpi-vms`
+- baseline commit: `fa6ccad`
+- clang-format 19 commit: `5b935ae`
+- CI commit: `170727b`
+- workflow: `.github/workflows/ci.yml`
+- trigger: `pull_request`, `workflow_dispatch`
+- runner: `ubuntu-24.04` x86_64
+- jobs: format, cppcheck, CMake build 및 CLI smoke test
+- Raspberry Pi hardware test와 deploy job: 미구현
+- GitHub 원격: `VEDA-NoC/RPI-Server`
+- 원격이 Public으로 확인되어 Private 전환 전까지 최초 push 보류
+
 ## Formatting
 
 - RPi C++: `outputs/rpi-vms/.clang-format`

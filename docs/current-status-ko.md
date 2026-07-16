@@ -164,11 +164,13 @@ Milestone M1: 시간 동기화와 지연 계측
 
 1. camera/Pi 공통 NTP 기준 결정 및 camera `SyncType` 변경
 2. Windows와 공통 기준 또는 상대 offset 측정
-3. RPi `.clang-format` 규칙 확정과 baseline Git 저장소 생성
-4. Qt에서 packet receive, decode complete, convert complete, GUI render를 monotonic
+3. Qt에서 packet receive, decode complete, convert complete, GUI render를 monotonic
    timestamp로 분리
-5. camera direct / existing proxy 경로의 baseline latency 측정
-6. 이후 단일 채널 `ChannelIngest` 구현
+4. camera direct / existing proxy 경로의 baseline latency 측정
+5. 이후 단일 채널 `ChannelIngest` 구현
+
+Git baseline과 CI 구성은 2026-07-16에 완료했다. 원격 저장소가 의도와 달리
+Public 상태로 확인되어 push는 Private 전환 확인 전까지 보류했다.
 
 ## 관련 문서
 
@@ -182,9 +184,15 @@ Milestone M1: 시간 동기화와 지연 계측
 ```text
 Windows WSL2 Ubuntu=running
 WSL clang-format=18.1.3
-Pi clang-format=installed, version not recorded yet
-Git repository=not initialized
-GitHub remote=not configured
+Windows Visual Studio clang-format=19.1.1
+Pi clang-format=19.1.7
+Git repository=initialized at outputs/rpi-vms
+Git commits=fa6ccad baseline, 5b935ae format, 170727b CI
+GitHub repository=VEDA-NoC/RPI-Server
+GitHub visibility=public as of 2026-07-16; private conversion required before push
+GitHub Actions=format, cppcheck, x86_64 build, CLI smoke test
+GitHub Actions execution=not run yet
+GitHub Codex connector=connected as Vlolet with repository admin/push access
 Confluence connector=not configured yet
 ```
 
