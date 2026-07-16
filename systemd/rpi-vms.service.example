@@ -1,0 +1,26 @@
+[Unit]
+Description=Raspberry Pi VMS channel 1 recorder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/veda/rpi-vms
+ExecStart=/home/pi/veda/rpi-vms/app \
+  --camera-host CAMERA_IP \
+  --camera-port 554 \
+  --camera-user USER \
+  --camera-password PASSWORD \
+  --camera-path-template /{camera_channel}/profile2/media.smp \
+  --camera-channel 0 \
+  --storage-root /mnt/vms-storage \
+  --channel-id 1 \
+  --codec h264 \
+  --segment-seconds 60 \
+  --require-storage-mount \
+  --log-level info
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+---
+Language: Cpp
+
+# 구글 C++ 스타일을 기본 베이스로 지정
+BasedOnStyle: Google
+
+# 들여쓰기(Indent) 설정을 4칸으로 변경
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+# (구글 기본 80자) 100~120자로 완화
+ColumnLimit: 120
+
+# 접근 제어자(public, private 등)는 들여쓰지 않고 클래스 벽면에 붙임
+AccessModifierOffset: -4
+
+# 중괄호({ }) 규칙: 구글 스타일인 함수/클래스 선언과 같은 줄에 배치 (Attach)
+BreakBeforeBraces: Attach
+
+# include 헤더 파일들을 알파벳 순서로 자동 정렬합니다.
+SortIncludes: true
+
+# 네임스페이스 내부 코드는 들여쓰지 않음
+NamespaceIndentation: None
+
+# 포인터/참조 기호 위치: 구글 표준은 우측 붙임 (int* ptr -> int *ptr)
+PointerAlignment: Right
+
+# 연속된 코드 줄바꿈 시 들여쓰기 크기
+ContinuationIndentWidth: 4
+...
