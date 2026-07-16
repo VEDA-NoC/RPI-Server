@@ -69,6 +69,15 @@ DB recording_segments.channel_id=1
 약 9~10초였다. 실행 직후 너무 빨리 종료한 시험에서 생성된 0~1초 파일은 정상
 장시간 녹화 판정에서 제외한다.
 
+### GitHub Actions
+
+2026-07-16 PR #1에서 초기 CI를 검증했다.
+
+- run #1: format/build 성공, cppcheck performance 경고 2건으로 실패
+- `trim_copy` 불필요 복사와 test client의 불필요한 `substr` 대입 수정
+- run #2: clang-format 19, cppcheck, x86_64 CMake build, CLI smoke test 모두 성공
+- Raspberry Pi, camera, USB storage 시험은 CI에 포함하지 않음
+
 ## 시간 동기화 상태
 
 ### Raspberry Pi
@@ -186,7 +195,7 @@ Git repository=initialized at outputs/rpi-vms
 GitHub repository=VEDA-NoC/RPI-Server
 GitHub visibility=public
 GitHub Actions=format, cppcheck, x86_64 build, CLI smoke test
-GitHub Actions execution=not run yet
+GitHub Actions execution=run #2 passed on PR #1
 GitHub Codex connector=connected as Vlolet with repository admin/push access
 Confluence connector=not configured yet
 ```

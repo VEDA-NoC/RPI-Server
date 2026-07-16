@@ -31,7 +31,7 @@ std::string replace_all(std::string s, const std::string& from, const std::strin
     return s;
 }
 
-std::string trim_copy(std::string s) {
+std::string trim_copy(const std::string& s) {
     const std::size_t first = s.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) {
         return {};
