@@ -159,6 +159,12 @@ def collect_ntp_samples(
         except (OSError, RuntimeError) as error:
             errors.append(str(error))
         if index + 1 < sample_count:
+            print(
+                f"[ntp] sample {index + 1}/{sample_count} finished; "
+                f"waiting {request_interval_s:g}s before the next request",
+                file=sys.stderr,
+                flush=True,
+            )
             time.sleep(request_interval_s)
 
     result: dict[str, Any] = {
@@ -365,10 +371,14 @@ def collect_remote_pi(
         ),
     )
     if not completed.get("ok"):
-        raise RuntimeError(
-            "Pi probe failed: "
-            + (completed.get("stderr") or completed.get("error") or "unknown error")
-        )
+        detail = completed.get("stderr") or completed.get("error") or "unknown error"
+        if "unrecognized arguments: --ntp-interval" in detail:
+            raise RuntimeError(
+                "Pi probe is older than the Windows collector. Synchronize "
+                "the latest source to ~/rpi-vms with tools/sync-to-pi.sh "
+                "before retrying."
+            )
+        raise RuntimeError("Pi probe failed: " + detail)
     try:
         return json.loads(completed["stdout"])
     except json.JSONDecodeError as error:
@@ -527,8 +537,21 @@ def main() -> int:
         "reference_ntp_server": args.ntp_server,
     }
     try:
+        ntp_wait_s = (args.samples - 1) * args.ntp_interval
+        print(
+            f"[1/3] Windows: collecting {args.samples} NTP samples "
+            f"(minimum interval wait {ntp_wait_s:g}s)",
+            file=sys.stderr,
+            flush=True,
+        )
         result["windows"] = local_probe(args)
         ensure_ntp_success(result["windows"], "Windows")
+        print(
+            f"[2/3] Raspberry Pi: collecting {args.samples} NTP samples over "
+            f"SSH (minimum interval wait {ntp_wait_s:g}s)",
+            file=sys.stderr,
+            flush=True,
+        )
         result["raspberry_pi"] = collect_remote_pi(
             args.pi_target,
             args.pi_repo,
@@ -538,6 +561,11 @@ def main() -> int:
             args.ntp_interval,
         )
         ensure_ntp_success(result["raspberry_pi"], "Raspberry Pi")
+        print(
+            f"[3/3] Camera: collecting {args.samples} read-only SUNAPI samples",
+            file=sys.stderr,
+            flush=True,
+        )
         result["camera"] = collect_camera_samples(
             args.camera_host,
             args.camera_user,

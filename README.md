@@ -105,7 +105,8 @@ bash tools/sync-to-pi.sh --dry-run
 bash tools/sync-to-pi.sh --build
 ```
 
-The script excludes `.git`, `.github`, recordings, SQLite databases,
+The script compares file contents with rsync checksums and excludes `.git`,
+`.github`, Python bytecode/cache files, recordings, SQLite databases,
 credentials, the local environment document, and build directories. Use clean
 mode only when stale files in `/home/noc/rpi-vms` should be removed:
 

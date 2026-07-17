@@ -74,6 +74,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 
 rsync_args=(
     --archive
+    --checksum
     --compress
     --human-readable
     --itemize-changes
@@ -83,6 +84,7 @@ rsync_args=(
     --filter="P /.env.*"
     --filter="P /certs/***"
     --filter="P /docs/current-environment-local-ko.md"
+    --exclude="/.git"
     --exclude="/.git/"
     --exclude="/.github/"
     --exclude="/build/"
@@ -97,6 +99,8 @@ rsync_args=(
     --exclude="*.log"
     --exclude="*.key"
     --exclude="*.pem"
+    --exclude="__pycache__/"
+    --exclude="*.pyc"
 )
 
 if $dry_run; then

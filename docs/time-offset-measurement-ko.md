@@ -21,25 +21,33 @@ GET /stw-cgi/system.cgi?msubmenu=date&action=view
 도구는 NTP 설정 변경, `w32tm /resync`, `timedatectl set-*`, SUNAPI `action=update`를
 실행하지 않는다.
 
-## 측정 전 준비
+## 1. WSL2 Ubuntu - Pi 동기화 및 원격 빌드
 
-Windows 저장소를 Pi에 먼저 동기화한다.
+전체 측정 전에 최신 Windows source를 Pi에 반드시 반영한다. 이 단계는 Windows
+PowerShell이나 Pi SSH shell이 아니라 **WSL2 Ubuntu**에서 실행한다. agent가 배포를
+수행한 경우 사용자가 반복할 필요가 없다.
 
 ```bash
 cd /mnt/c/Users/shini/Documents/Codex/2026-07-10/rtsps-codex-hanwha-rtsp-raspberry-pi/outputs/rpi-vms
 bash tools/sync-to-pi.sh --dry-run
-bash tools/sync-to-pi.sh
+bash tools/sync-to-pi.sh --build
 ```
+
+정상이면 dry-run에서 전송 예정 파일이 표시되고, 실제 실행에서 source 동기화 후 Pi의
+`make clean && make`가 성공한다. Python 도구 변경 자체에는 C++ build가 필요하지
+않지만, 이 명령은 배포 source와 현재 Pi build가 함께 정상인지 확인한다.
 
 Windows와 Pi에서 UDP/123으로 접근 가능한 동일 NTP 서버 하나를 정한다. 이 서버는
 이번 측정의 공통 기준일 뿐이며, 장치의 현재 NTP 설정을 변경하지 않는다. DNS
 anycast/pool 이름은 두 장치에서 서로 다른 서버로 해석될 수 있으므로 정밀 비교에는
 가능하면 같은 서버 IP 또는 같은 사내 NTP 주소를 사용한다.
 
-## 실행
+## 2. Windows 관리자 PowerShell - 전체 측정
 
-관리자 Windows PowerShell에서 Python launcher를 사용한다. 관리자 권한이 없으면
-환경에 따라 `w32tm /query` 상태 수집이 `0x80070005`로 거부될 수 있다.
+이 단계만 사용자가 실행한다. 시작 메뉴에서 PowerShell을 **관리자 권한으로 실행**하고
+저장소 디렉터리로 이동한 뒤 Python launcher를 사용한다. 일반 PowerShell에서는
+환경에 따라 `w32tm /query`가 `0x80070005`로 거부될 수 있다. Pi SSH shell에서는
+전체 collector를 실행하지 않는다.
 
 ```powershell
 py -3 tools/measure_time_offsets.py `
@@ -55,9 +63,13 @@ py -3 tools/measure_time_offsets.py `
 `measurements/time-offset-YYYYMMDDTHHMMSSZ.json`에 결과를 저장하고 핵심 상대
 offset을 콘솔에 출력한다. RFC 4330의 SNTP client poll 제한에 따라 NTP 연속 요청은
 기본 15초 간격이며 더 짧게 설정할 수 없다. 7개 표본을 Windows와 Pi에서 순차 수집하고
-camera를 조회하므로 전체 실행 시간은 약 3~4분이다.
+camera를 조회하므로 전체 실행 시간은 약 3~4분이다. 실행 중 `[1/3] Windows`,
+`[2/3] Raspberry Pi`, `[3/3] Camera` 단계와 15초 대기 상태가 stderr에 표시된다.
 
-Pi probe만 독립 확인할 때는 다음을 사용한다.
+## 3. Raspberry Pi SSH shell - Pi probe 단독 진단
+
+전체 측정이 Pi 단계에서 실패할 때만 Pi SSH shell에서 다음을 사용한다. 정상 측정
+절차에서는 실행할 필요가 없다.
 
 ```bash
 python3 tools/measure_time_offsets.py \

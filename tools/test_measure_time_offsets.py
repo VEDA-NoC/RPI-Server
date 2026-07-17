@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import io
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -90,7 +91,9 @@ class NtpSamplingTest(unittest.TestCase):
         }
         with mock.patch.object(
             MODULE, "query_ntp_once", return_value=sample.copy()
-        ), mock.patch.object(MODULE.time, "sleep") as sleep:
+        ), mock.patch.object(MODULE.time, "sleep") as sleep, mock.patch.object(
+            MODULE.sys, "stderr", io.StringIO()
+        ):
             result = MODULE.collect_ntp_samples(
                 "192.0.2.1", 3, 1.0, MODULE.MIN_NTP_REQUEST_INTERVAL_S
             )
@@ -103,6 +106,17 @@ class NtpSamplingTest(unittest.TestCase):
                 mock.call(MODULE.MIN_NTP_REQUEST_INTERVAL_S),
             ],
         )
+
+    def test_remote_probe_explains_stale_pi_source(self):
+        completed = {
+            "ok": False,
+            "stderr": "error: unrecognized arguments: --ntp-interval 15.0",
+        }
+        with mock.patch.object(MODULE, "run_command", return_value=completed):
+            with self.assertRaisesRegex(RuntimeError, "Synchronize the latest source"):
+                MODULE.collect_remote_pi(
+                    "noc@noc", "/home/noc/rpi-vms", "192.0.2.1", 3, 1.0, 15.0
+                )
 
 
 if __name__ == "__main__":
