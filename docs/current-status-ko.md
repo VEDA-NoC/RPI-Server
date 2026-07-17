@@ -1,6 +1,6 @@
 # RPi VMS 현재 상태
 
-마지막 갱신: 2026-07-16
+마지막 갱신: 2026-07-17
 
 ## 검증 환경 개요
 
@@ -107,6 +107,14 @@ DB recording_segments.channel_id=1
 - Windows/Pi/camera 상대 offset과 추정 불확실성을 JSON으로 기록
 - SUNAPI 초 단위 시각 해상도에 따른 ±500ms 한계를 명시
 - parser와 offset 부호 계산 unit test 추가
+
+2026-07-17 검증 및 게시:
+
+- local Python unit test 4개 통과
+- Python syntax compile과 CLI help smoke test 통과
+- draft PR #4 생성
+- GitHub Actions run #29562779440에서 clang-format 19, cppcheck,
+  x86_64 CMake build/CLI smoke test/Python unit test 모두 통과
 
 실제 Pi/camera/common NTP 서버를 사용한 통합 측정은 아직 수행하지 않았다. 카메라
 설정도 변경하지 않았다. 실행 절차와 offset 정의는
