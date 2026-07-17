@@ -165,8 +165,14 @@ RTP loss/late/jitter
 RTT가 아니라 같은 NTP 상태 출력의 jitter다. 따라서 두 값을 “외부망 약 5ms, 내부망
 약 2ms”의 직접 비교 근거로 사용하지 않는다.
 
-내부 Pi -> 카메라 RTT는 같은 시점의 별도 ICMP 측정이 아직 없다. 내부망 RTT가
-외부망보다 작아지면 `camera_to_rpi` 또는 `network_to_qt`의 일부는 줄 수 있지만,
-수 ms 차이만으로 육안 약 500ms를 설명할 수는 없다. 카메라 encoder/GOP, RTSP jitter
-buffer, FFmpeg demux/decode, GUI queue를 T0..T7로 나눠 측정해야 주된 병목을 판정할
-수 있다.
+2026-07-17 같은 Pi에서 같은 시점에 ICMP 10회로 다시 비교했다.
+
+| 경로 | min/avg/max/mdev | packet loss |
+| --- | --- | ---: |
+| Pi -> camera `192.168.0.5` 내부 LAN | `0.209/0.347/0.719/0.152ms` | `0%` |
+| Pi -> `52.231.114.183` 외부망 | `4.420/5.358/5.962/0.527ms` | `0%` |
+
+내부 LAN 평균 RTT는 외부망보다 `5.011ms`, 약 93.5% 작았다. 따라서 내부망에서
+network component가 줄어든다는 판단은 맞다. 다만 절대 절감량이 약 5ms이므로 육안
+약 500ms의 주원인은 아니다. 카메라 encoder/GOP, RTSP jitter buffer, FFmpeg
+demux/decode, GUI queue를 T0..T7로 나눠 측정해야 주된 병목을 판정할 수 있다.
