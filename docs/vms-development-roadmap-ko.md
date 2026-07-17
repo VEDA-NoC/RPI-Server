@@ -24,11 +24,19 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 5. Qt에서 packet receive, decode complete, GUI render 시각을 분리한다.
 6. 카메라 직접 연결, 기존 RTSPS proxy, 새 VMS live 경로를 같은 조건으로 비교한다.
 
+성능 목표:
+
+- live 영상 end-to-end `T7 - T0`는 `200ms 이하`를 기준으로 한다.
+- p50/p95/max를 함께 기록하고 각 값의 기준 충족 여부를 판정한다.
+- clock offset, NTP/ICMP/HTTP RTT, Qt GUI queue 지연을 end-to-end 지연으로 대신하지
+  않는다.
+
 완료 조건:
 
 - clock offset을 확인할 수 있다.
 - Qt의 `delay`가 GUI queue 지연과 end-to-end 지연으로 구분된다.
 - 평균뿐 아니라 p50/p95/max와 frame drop 수를 기록한다.
+- 실제 end-to-end 결과를 200ms 기준과 비교한다.
 
 ### M2. 단일 채널 ChannelIngest
 
@@ -86,8 +94,10 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 
 ## 바로 다음 작업
 
-1. `tools/measure_time_offsets.py`를 실제 Pi/Windows/camera 환경에서 실행하고
-   공통 NTP 기준과 camera `SyncType` 변경안을 결정한다.
-2. Qt `StreamWorker`의 단계별 monotonic timestamp 구조를 설계한다.
-3. Qt에 packet-to-decode, decode-to-GUI, GUI queue p50/p95를 추가한다.
-4. 그 다음 단일 채널 `ChannelIngest`로 recorder 구조를 바꾼다.
+1. M1-B에서 Qt `StreamWorker`와 GStreamer ingest의 단계별 monotonic timestamp
+   구조를 설계한다.
+2. camera direct / existing proxy의 영상 end-to-end p50/p95/max를 측정하고 200ms
+   기준과 비교한다.
+3. 구간별 병목을 확인한 뒤 Qt queue와 VMS live branch의 latency 정책을 결정한다.
+4. camera NTP/SyncType 설정은 별도 승인 전까지 변경하지 않는다.
+5. 그 다음 단일 채널 `ChannelIngest`로 recorder 구조를 바꾼다.

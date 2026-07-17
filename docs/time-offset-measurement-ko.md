@@ -11,6 +11,9 @@
 - Hanwha SUNAPI date 조회 결과
 - Windows, Pi, 카메라 사이의 추정 상대 offset
 
+이 값들은 장치 wall clock 차이를 확인하기 위한 것이며 영상 end-to-end latency가
+아니다. 영상 목표 `T7 - T0 <= 200ms`와 직접 비교하지 않는다.
+
 카메라에는 다음 read-only 요청만 전송한다.
 
 ```text
@@ -101,10 +104,12 @@ camera_minus_reference = camera_minus_windows - windows_ntp_offset
 camera_minus_pi = camera_minus_windows - pi_minus_windows
 ```
 
-SUNAPI `UTCTime`은 관측 응답에서 초 단위이므로 카메라 offset에는 기본적으로
-±500ms와 HTTP 왕복시간 절반의 불확실성이 있다. 이 측정은 카메라 drift와 큰 시각
-오차를 판별하는 용도이며, 밀리초 단위 카메라 media timestamp 검증은 M1-B의
-RTCP Sender Report 계측으로 수행한다.
+SUNAPI `UTCTime`은 관측 응답에서 초 단위이므로 카메라 offset의 하한 불확실성에는
+±500ms와 HTTP 왕복시간 절반이 포함된다. SUNAPI 2.6.8 Date Information은 요청 처리
+중 `UTCTime`을 캡처하는 정확한 시점을 정의하지 않으므로 camera-side systematic
+error는 이 수치에 포함되지 않는다. 이 측정은 카메라 drift와 큰 시각 오차를 판별하는
+용도이며, 밀리초 단위 카메라 media timestamp와 영상 end-to-end 검증은 M1-B의 RTCP
+Sender Report 계측 및 glass-to-glass 측정으로 수행한다.
 
 ## 실패 시 확인
 

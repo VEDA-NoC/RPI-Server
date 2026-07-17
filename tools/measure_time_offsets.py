@@ -330,8 +330,10 @@ def collect_camera_samples(
         ),
         "round_trip_ms": summarize_numeric(samples, "round_trip_ms"),
         "uncertainty_note": (
-            "SUNAPI UTCTime is observed at one-second resolution; each sample "
-            "includes +/-500 ms plus half HTTP round-trip time."
+            "This is a lower-bound estimate from SUNAPI UTCTime one-second "
+            "resolution (+/-500 ms) and half HTTP round-trip time. SUNAPI "
+            "does not define when UTCTime is captured during request "
+            "processing, so unknown camera-side systematic error is excluded."
         ),
     }
 
@@ -425,6 +427,11 @@ def calculate_relative_offsets(
             "camera_minus_pi": camera_uncertainty
             + (windows_delay + pi_delay) / 2.0,
         },
+        "estimated_uncertainty_scope": (
+            "Camera uncertainty is a lower-bound estimate from timestamp "
+            "quantization and measured network round trips. It excludes "
+            "unknown SUNAPI camera-side timestamp capture semantics."
+        ),
         "interpretation": (
             "A positive value means the left-side clock is ahead of the "
             "right-side clock."

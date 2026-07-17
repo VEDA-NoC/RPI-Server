@@ -75,6 +75,36 @@ class OffsetCalculationTest(unittest.TestCase):
         )
         self.assertTrue(result["reference_peers"]["same_address_set"])
 
+    def test_reproduces_2026_07_17_measurement(self):
+        windows = {
+            "ntp": {
+                "offset_ms": {"median": 32.298147678375244},
+                "round_trip_delay_ms": {"median": 16.803860664367676},
+                "samples": [{"peer": "52.231.114.183"}],
+            }
+        }
+        pi = {
+            "ntp": {
+                "offset_ms": {"median": 0.534355640411377},
+                "round_trip_delay_ms": {"median": 5.28407096862793},
+                "samples": [{"peer": "52.231.114.183"}],
+            }
+        }
+        camera = {
+            "camera_minus_local_ms": {"median": -2390.836477279663},
+            "samples": [{"uncertainty_ms": 525.3140926361084}],
+        }
+
+        result = MODULE.calculate_relative_offsets(windows, pi, camera)
+
+        self.assertAlmostEqual(
+            result["pi_minus_windows_ms"], 31.763792037963867
+        )
+        self.assertAlmostEqual(
+            result["camera_minus_pi_ms"], -2422.600269317627
+        )
+        self.assertIn("lower-bound", result["estimated_uncertainty_scope"])
+
 
 class NtpSamplingTest(unittest.TestCase):
     def test_parser_defaults_to_minimum_ntp_interval(self):
