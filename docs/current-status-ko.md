@@ -116,9 +116,28 @@ DB recording_segments.channel_id=1
 - GitHub Actions run #29562779440에서 clang-format 19, cppcheck,
   x86_64 CMake build/CLI smoke test/Python unit test 모두 통과
 
-실제 Pi/camera/common NTP 서버를 사용한 통합 측정은 아직 수행하지 않았다. 카메라
-설정도 변경하지 않았다. 실행 절차와 offset 정의는
-`docs/time-offset-measurement-ko.md`에 기록했다.
+도구 구현 시점에는 실제 Pi/camera/common NTP 서버 통합 측정을 수행하지 않았다.
+실행 절차와 offset 정의는 `docs/time-offset-measurement-ko.md`에 기록했다.
+
+2026-07-17 실제 read-only 통합 측정:
+
+- Windows와 Pi가 동일한 Microsoft NTP peer `52.231.114.183`을 조회
+- Windows SNTP 7/7 성공, offset 중앙값 `reference - Windows = +10.722ms`,
+  RTT 중앙값 `5.223ms`
+- Pi SNTP 6/7 성공, offset 중앙값 `reference - Pi = -0.306ms`,
+  RTT 중앙값 `6.041ms`; 1개 표본 timeout
+- 상대 offset `Pi - Windows = +11.028ms`, 추정 불확실성 `±5.632ms`
+- camera `SyncType=Manual`, `camera - Pi = -2198.890ms`, SUNAPI 초 단위
+  해상도를 포함한 추정 불확실성 `±531.798ms`
+- 최초 수집 당시 Windows Time은 `Local CMOS Clock`, stratum 0,
+  unsynchronized 상태였음
+- 관리자 `w32tm /resync /rediscover` 후 source `time.windows.com,0x9`,
+  stratum 5, last sync success로 복구됨
+- camera 설정은 변경하지 않음
+
+실제 JSON 응답에서 배열 형태의 camera `NTPURLList`가 누락되는 parser 결함을 발견해
+scalar JSON array를 보존하도록 수정하고 unit test를 추가했다. 위 offset 계산에는
+영향이 없다.
 
 ### Raspberry Pi
 

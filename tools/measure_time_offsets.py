@@ -179,7 +179,11 @@ def flatten_mapping(value: Any) -> dict[str, Any]:
     def visit(item: Any) -> None:
         if isinstance(item, dict):
             for key, child in item.items():
-                if isinstance(child, (dict, list)):
+                if isinstance(child, list) and all(
+                    not isinstance(value, (dict, list)) for value in child
+                ):
+                    flattened[str(key).lower()] = child
+                elif isinstance(child, (dict, list)):
                     visit(child)
                 else:
                     flattened[str(key).lower()] = child

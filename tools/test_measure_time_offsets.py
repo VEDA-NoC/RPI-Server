@@ -30,10 +30,14 @@ class SunapiResponseTest(unittest.TestCase):
     def test_parses_nested_json_response(self):
         parsed = MODULE.parse_sunapi_date_response(
             '{"Date": {"UTCTime": "2026-07-16 02:32:15", '
-            '"SyncType": "NTP"}}'
+            '"SyncType": "NTP", "NTPURLList": ["pool.ntp.org", '
+            '"asia.pool.ntp.org"]}}'
         )
         self.assertEqual(parsed["UTCTime"], "2026-07-16 02:32:15")
         self.assertEqual(parsed["SyncType"], "NTP")
+        self.assertEqual(
+            parsed["NTPURLList"], ["pool.ntp.org", "asia.pool.ntp.org"]
+        )
 
     def test_rejects_response_without_utc(self):
         with self.assertRaises(ValueError):
