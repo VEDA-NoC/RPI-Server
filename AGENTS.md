@@ -12,6 +12,10 @@
 - Apply the repository `.clang-format` only to modified C/C++ files, except in an explicit formatting-only commit.
 - Treat Raspberry Pi camera, USB, and network checks as hardware integration tests; x86 CI does not replace them.
 - After edits, report changed files, deployment steps, exact build/test commands, expected output, failure logs, and unverified items.
+- Keep feature PRs in draft until implementation, documentation, automated checks, and required hardware validation are complete or explicitly listed as unverified.
+- Do not request piecemeal PR approval. Before approval, provide one final review packet covering the PR/branch/commits, changed files and key functions, behavior/security/compatibility impact, actual test evidence, hardware conditions, unverified items, known limitations, and an exact reviewer checklist.
+- The user does not need to approve a PR until the agent explicitly labels the handoff `PR 승인 요청 단계`. Marking a PR ready or merging it requires an explicit user request.
+- If commits are added after the review packet, rerun relevant checks and refresh the packet before requesting approval.
 - End every completed task with the current state, exactly one recommended next task, and who acts next.
 - Do not stop at "no further user testing is required." When roadmap work remains, select the next item and state whether the agent continues now or the user must open a new task.
 - If a new task is required, provide its exact title and starter message. If the user has nothing to do, state `사용자 행동 없음` and name the next agent action.
