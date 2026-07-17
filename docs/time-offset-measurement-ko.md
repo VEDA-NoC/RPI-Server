@@ -47,12 +47,15 @@ py -3 tools/measure_time_offsets.py `
   --camera-user admin `
   --pi-target noc@noc `
   --ntp-server NTP_SERVER_OR_IP `
-  --samples 7
+  --samples 7 `
+  --ntp-interval 15
 ```
 
 실행 후 SUNAPI 비밀번호 prompt가 나타난다. 정상 완료 시 Git에서 제외되는
 `measurements/time-offset-YYYYMMDDTHHMMSSZ.json`에 결과를 저장하고 핵심 상대
-offset을 콘솔에 출력한다.
+offset을 콘솔에 출력한다. RFC 4330의 SNTP client poll 제한에 따라 NTP 연속 요청은
+기본 15초 간격이며 더 짧게 설정할 수 없다. 7개 표본을 Windows와 Pi에서 순차 수집하고
+camera를 조회하므로 전체 실행 시간은 약 3~4분이다.
 
 Pi probe만 독립 확인할 때는 다음을 사용한다.
 
@@ -60,7 +63,8 @@ Pi probe만 독립 확인할 때는 다음을 사용한다.
 python3 tools/measure_time_offsets.py \
   --local-probe \
   --ntp-server NTP_SERVER_OR_IP \
-  --samples 7
+  --samples 7 \
+  --ntp-interval 15
 ```
 
 ## offset 정의

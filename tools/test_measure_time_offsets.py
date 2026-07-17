@@ -3,6 +3,7 @@
 import importlib.util
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).with_name("measure_time_offsets.py")
@@ -72,6 +73,36 @@ class OffsetCalculationTest(unittest.TestCase):
             result["estimated_uncertainty_ms"]["pi_minus_windows"], 5.0
         )
         self.assertTrue(result["reference_peers"]["same_address_set"])
+
+
+class NtpSamplingTest(unittest.TestCase):
+    def test_parser_defaults_to_minimum_ntp_interval(self):
+        parser = MODULE.build_parser()
+        args = parser.parse_args(["--ntp-server", "192.0.2.1", "--local-probe"])
+
+        self.assertEqual(args.ntp_interval, MODULE.MIN_NTP_REQUEST_INTERVAL_S)
+
+    def test_waits_configured_interval_between_requests(self):
+        sample = {
+            "peer": "192.0.2.1",
+            "offset_ms": 1.0,
+            "round_trip_delay_ms": 2.0,
+        }
+        with mock.patch.object(
+            MODULE, "query_ntp_once", return_value=sample.copy()
+        ), mock.patch.object(MODULE.time, "sleep") as sleep:
+            result = MODULE.collect_ntp_samples(
+                "192.0.2.1", 3, 1.0, MODULE.MIN_NTP_REQUEST_INTERVAL_S
+            )
+
+        self.assertEqual(result["successful_samples"], 3)
+        self.assertEqual(
+            sleep.call_args_list,
+            [
+                mock.call(MODULE.MIN_NTP_REQUEST_INTERVAL_S),
+                mock.call(MODULE.MIN_NTP_REQUEST_INTERVAL_S),
+            ],
+        )
 
 
 if __name__ == "__main__":

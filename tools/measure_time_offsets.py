@@ -25,6 +25,7 @@ from typing import Any
 NTP_EPOCH_DELTA = 2_208_988_800
 SUNAPI_DATE_PATH = "/stw-cgi/system.cgi?msubmenu=date&action=view"
 CAMERA_TIME_RESOLUTION_MS = 1_000.0
+MIN_NTP_REQUEST_INTERVAL_S = 15.0
 
 
 def utc_now_iso() -> str:
@@ -143,7 +144,10 @@ def summarize_numeric(samples: list[dict[str, Any]], key: str) -> dict[str, floa
 
 
 def collect_ntp_samples(
-    server: str, sample_count: int, timeout_s: float
+    server: str,
+    sample_count: int,
+    timeout_s: float,
+    request_interval_s: float,
 ) -> dict[str, Any]:
     samples: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -155,7 +159,7 @@ def collect_ntp_samples(
         except (OSError, RuntimeError) as error:
             errors.append(str(error))
         if index + 1 < sample_count:
-            time.sleep(0.2)
+            time.sleep(request_interval_s)
 
     result: dict[str, Any] = {
         "server": server,
@@ -332,6 +336,7 @@ def collect_remote_pi(
     ntp_server: str,
     sample_count: int,
     timeout_s: float,
+    ntp_interval_s: float,
 ) -> dict[str, Any]:
     remote_script = f"{pi_repo.rstrip('/')}/tools/measure_time_offsets.py"
     remote_command = " ".join(
@@ -346,11 +351,18 @@ def collect_remote_pi(
             str(sample_count),
             "--timeout",
             str(timeout_s),
+            "--ntp-interval",
+            str(ntp_interval_s),
         ]
     )
     completed = run_command(
         ["ssh", pi_target, remote_command],
-        timeout_s=max(30.0, sample_count * (timeout_s + 1.0)),
+        timeout_s=max(
+            60.0,
+            45.0
+            + sample_count * timeout_s
+            + (sample_count - 1) * ntp_interval_s,
+        ),
     )
     if not completed.get("ok"):
         raise RuntimeError(
@@ -425,7 +437,10 @@ def local_probe(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "host": collect_host_status(),
         "ntp": collect_ntp_samples(
-            args.ntp_server, args.samples, args.timeout
+            args.ntp_server,
+            args.samples,
+            args.timeout,
+            args.ntp_interval,
         ),
     }
 
@@ -458,6 +473,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ntp-server", required=True)
     parser.add_argument("--samples", type=int, default=5)
     parser.add_argument("--timeout", type=float, default=3.0)
+    parser.add_argument(
+        "--ntp-interval",
+        type=float,
+        default=MIN_NTP_REQUEST_INTERVAL_S,
+        help=(
+            "seconds between consecutive SNTP requests "
+            f"(minimum: {MIN_NTP_REQUEST_INTERVAL_S:g}, default: "
+            f"{MIN_NTP_REQUEST_INTERVAL_S:g})"
+        ),
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--local-probe", action="store_true", help=argparse.SUPPRESS)
     return parser
@@ -468,6 +493,11 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         parser.error("--samples must be at least 1")
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
+    if args.ntp_interval < MIN_NTP_REQUEST_INTERVAL_S:
+        parser.error(
+            "--ntp-interval must be at least "
+            f"{MIN_NTP_REQUEST_INTERVAL_S:g} seconds"
+        )
     if not args.local_probe and not args.camera_host:
         parser.error("--camera-host is required")
 
@@ -505,6 +535,7 @@ def main() -> int:
             args.ntp_server,
             args.samples,
             args.timeout,
+            args.ntp_interval,
         )
         ensure_ntp_success(result["raspberry_pi"], "Raspberry Pi")
         result["camera"] = collect_camera_samples(
