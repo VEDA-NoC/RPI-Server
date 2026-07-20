@@ -30,8 +30,9 @@ GET /stw-cgi/system.cgi?msubmenu=date&action=view
 PowerShell이나 Pi SSH shell이 아니라 **WSL2 Ubuntu**에서 실행한다. agent가 배포를
 수행한 경우 사용자가 반복할 필요가 없다.
 
+활성 저장소 루트에서 실행한다.
+
 ```bash
-cd /mnt/c/Users/shini/Documents/Codex/2026-07-10/rtsps-codex-hanwha-rtsp-raspberry-pi/outputs/rpi-vms
 bash tools/sync-to-pi.sh --dry-run
 bash tools/sync-to-pi.sh --build
 ```

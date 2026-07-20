@@ -1,139 +1,89 @@
 # Raspberry Pi VMS
 
-This is the VMS-oriented working copy derived from the original RTSPS proxy.
+Hanwha RTSP camera의 원본 H.264/H.265 stream을 Raspberry Pi에서 녹화하고, 이후
+live fan-out·event recording·playback으로 확장하는 VMS 프로젝트다.
 
-The current milestone is intentionally small:
-
-```text
-Hanwha RTSP camera channel 0
--> GStreamer RTP depayload / H264 or H265 parse
--> 60-second MP4 segments
--> VMS channel 1 storage and SQLite recording_segments index
-```
-
-The previous proxy code is still present in the tree for reference, but the default
-`app` target now builds the VMS recorder entry point in `src/main.cpp`.
-
-Design notes:
+현재 구현은 단일 채널 연속 녹화 PoC다.
 
 ```text
-docs/current-status-ko.md
-docs/sunapi-event-recording.md
-docs/latency-measurement-ko.md
-docs/time-offset-measurement-ko.md
-docs/vms-development-roadmap-ko.md
-docs/new-task-prompt-ko.md
-docs/git-ci-plan-ko.md
+camera channel 0
+  -> RTSP over TCP / Digest
+  -> RTP depayload / codec parse
+  -> MP4 segment
+  -> VMS channel 1 storage + SQLite index
 ```
 
-The next architecture step is not a separate `probe` mode. It is `ChannelIngest`:
-the camera RTSP connection stays open, while recording/live branches are controlled
-by policy, SUNAPI events, and client sessions.
+현재 상태와 다음 작업은 다음 두 문서를 기준으로 한다.
 
-Camera connection options intentionally keep the original proxy style:
+- `docs/current-status-ko.md`
+- `docs/vms-development-roadmap-ko.md`
+
+세부 설계 문서는 필요한 작업에서만 읽는다.
+
+- 시간·지연: `docs/time-offset-measurement-ko.md`, `docs/latency-measurement-ko.md`
+- SUNAPI event: `docs/sunapi-event-recording-ko.md`
+- Git·CI: `docs/git-ci-plan-ko.md`
+
+## 채널과 경로 기준
 
 ```text
---camera-host
---camera-port
---camera-user
---camera-password
---camera-path-template
+camera_channel=0..3  camera RTSP/SUNAPI namespace
+channel_id=1..4      VMS/DB/client/storage namespace
 ```
 
-Channel numbering is explicit:
+기본 mapping은 camera channel `0`을 VMS channel `1`로 저장한다.
 
 ```text
---camera-channel 0..3  Hanwha RTSP/SUNAPI channel index
---channel-id 1..4      VMS, DB, client, directory, and filename channel ID
+/mnt/vms-storage/
+  index/media.db
+  recordings/ch1/ch1_*.mp4
 ```
 
-The default mapping therefore reads camera channel `0` and stores it under
-`recordings/ch1` with `recording_segments.channel_id = 1`. The legacy
-`{channel}` camera-path placeholder remains accepted, but new configuration
-should use `{camera_channel}`.
-
-The app builds the RTSP URL internally and passes it to GStreamer `rtspsrc`.
-Digest authentication is handled by `rtspsrc`, not by embedding a custom RTSP
-client loop in this milestone.
-
-## Install Packages On Raspberry Pi
+## Raspberry Pi package
 
 ```bash
 sudo apt update
 sudo apt install -y \
-  build-essential \
-  cmake \
-  pkg-config \
-  sqlite3 \
-  libsqlite3-dev \
-  libgstreamer1.0-dev \
-  gstreamer1.0-tools \
-  gstreamer1.0-plugins-base \
-  gstreamer1.0-plugins-good \
+  build-essential cmake pkg-config sqlite3 libsqlite3-dev \
+  libgstreamer1.0-dev gstreamer1.0-tools \
+  gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
   gstreamer1.0-plugins-bad
 ```
 
-If the camera uses H.265 and parsing fails, check that the Raspberry Pi image has
-the needed GStreamer plugin package installed.
-
 ## Build
+
+활성 저장소 루트에서 실행한다.
 
 ```bash
 make clean
 make
 ```
 
-Or with CMake:
+또는:
 
 ```bash
 cmake -S . -B build
 cmake --build build -j
 ```
 
-## Raspberry Pi Synchronization
+Makefile output은 `./app`, CMake output은 `build/rpi_vms`다.
 
-Run the deployment sync from WSL. The Windows repository remains the source of
-truth, and the Raspberry Pi remains the native build and hardware-test target.
+## Raspberry Pi 반영
+
+Windows의 활성 worktree를 source of truth로 사용하고 WSL2에서 실행한다.
 
 ```bash
-cd /mnt/c/Users/shini/Documents/Codex/2026-07-10/rtsps-codex-hanwha-rtsp-raspberry-pi/outputs/rpi-vms
-
-# Inspect the changes first.
 bash tools/sync-to-pi.sh --dry-run
-
-# Synchronize source and run the native Pi build.
 bash tools/sync-to-pi.sh --build
 ```
 
-The script compares file contents with rsync checksums and excludes `.git`,
-`.github`, Python bytecode/cache files, recordings, SQLite databases,
-credentials, the local environment document, and build directories. Use clean
-mode only when stale files in `/home/noc/rpi-vms` should be removed:
+도구는 `.git`, `.github`, build/cache, recording, SQLite DB, credential, local 환경
+문서를 Pi 전송에서 제외한다. `--clean`은 stale file 삭제가 필요한 경우에만 사용한다.
 
-```bash
-bash tools/sync-to-pi.sh --clean --build
-```
+## 시간 offset 측정
 
-Clean mode protects the existing Pi `app`, `.env`, `certs/`, and
-`docs/current-environment-local-ko.md`.
-
-The Makefile output is:
-
-```text
-./app
-```
-
-The CMake output is:
-
-```text
-build/rpi_vms
-```
-
-## Read-only Clock Measurement
-
-M1-A provides a standard-library Python tool that collects Windows, Raspberry Pi,
-and Hanwha camera clock state without changing time settings. Synchronize the
-repository to the Pi first, then run from Windows PowerShell:
+M1-A 도구는 camera 설정을 변경하지 않고 Windows/Pi/camera wall clock 차이를
+측정한다. 이 값은 영상 end-to-end latency가 아니다.
 
 ```powershell
 py -3 tools/measure_time_offsets.py `
@@ -141,64 +91,23 @@ py -3 tools/measure_time_offsets.py `
   --camera-user admin `
   --pi-target noc@noc `
   --ntp-server COMMON_NTP_SERVER_OR_IP `
-  --samples 7
+  --samples 7 `
+  --ntp-interval 15
 ```
 
-The SUNAPI password is entered interactively and is not written to the command
-line or result file. See `docs/time-offset-measurement-ko.md` for offset signs,
-uncertainty, and failure diagnostics.
+SUNAPI password는 prompt에서 입력하며 명령행과 결과 파일에 저장하지 않는다.
 
-## Run
+## 실행 예시
 
-Prepare a writable storage root first:
-
-```bash
-sudo mkdir -p /mnt/vms-storage
-sudo chown "$USER:$USER" /mnt/vms-storage
-```
-
-H.264 example:
+실제 운영 녹화는 외장 ext4 mount를 필수로 확인한다. password는 예시처럼 직접
+명령행에 고정하지 말고 배치별 보호된 입력 방식을 사용한다.
 
 ```bash
 ./app \
   --camera-host CAMERA_IP \
   --camera-port 554 \
   --camera-user USER \
-  --camera-password 'PASSWORD' \
-  --camera-path-template '/{camera_channel}/profile2/media.smp' \
-  --camera-channel 0 \
-  --storage-root /mnt/vms-storage \
-  --channel-id 1 \
-  --codec h264 \
-  --segment-seconds 60 \
-  --log-level debug
-```
-
-H.265 example:
-
-```bash
-./app \
-  --camera-host CAMERA_IP \
-  --camera-port 554 \
-  --camera-user USER \
-  --camera-password 'PASSWORD' \
-  --camera-path-template '/{camera_channel}/profile2/media.smp' \
-  --camera-channel 0 \
-  --storage-root /mnt/vms-storage \
-  --channel-id 1 \
-  --codec h265 \
-  --segment-seconds 60 \
-  --log-level debug
-```
-
-For real recording service operation, require a real mounted storage device:
-
-```bash
-./app \
-  --camera-host CAMERA_IP \
-  --camera-port 554 \
-  --camera-user USER \
-  --camera-password 'PASSWORD' \
+  --camera-password "$CAMERA_PASSWORD" \
   --camera-path-template '/{camera_channel}/profile2/media.smp' \
   --camera-channel 0 \
   --storage-root /mnt/vms-storage \
@@ -209,30 +118,6 @@ For real recording service operation, require a real mounted storage device:
   --log-level info
 ```
 
-Output layout:
-
-```text
-/mnt/vms-storage/
-  index/
-    media.db
-  recordings/
-    ch1/
-      ch1_20260710T090512Z_00000.mp4
-      ch1_20260710T090512Z_00001.mp4
-```
-
-Inspect the DB:
-
-```bash
-sqlite3 /mnt/vms-storage/index/media.db \
-  'select id, channel_id, file_path, codec, complete, size_bytes from recording_segments;'
-```
-
-## Notes
-
-- This code does not transcode.
-- It uses `rtspsrc protocols=tcp`.
-- `StorageManager` warns when `--storage-root` is not a mount point.
-- Use `--require-storage-mount` to fail instead of warning.
-- Real UUID mount management is a later step.
-- Playback and live fan-out are not implemented yet.
+현재 코드는 camera URI를 내부에서 만들고 GStreamer `rtspsrc`가 Digest 인증을
+처리한다. recording/live 경로는 transcoding하지 않는다. `ChannelIngest`, shared
+live server, event gate, playback은 로드맵의 후속 구현이다.
