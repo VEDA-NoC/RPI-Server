@@ -109,7 +109,7 @@ SUNAPI `UTCTime`은 관측 응답에서 초 단위이므로 카메라 offset의 
 ±500ms와 HTTP 왕복시간 절반이 포함된다. SUNAPI 2.6.8 Date Information은 요청 처리
 중 `UTCTime`을 캡처하는 정확한 시점을 정의하지 않으므로 camera-side systematic
 error는 이 수치에 포함되지 않는다. 이 측정은 카메라 drift와 큰 시각 오차를 판별하는
-용도이며, 밀리초 단위 카메라 media timestamp와 영상 end-to-end 검증은 M1-B의 RTCP
+용도이며, 밀리초 단위 카메라 media timestamp와 영상 end-to-end 검증은 M9의 RTCP
 Sender Report 계측 및 glass-to-glass 측정으로 수행한다.
 
 ## 실패 시 확인

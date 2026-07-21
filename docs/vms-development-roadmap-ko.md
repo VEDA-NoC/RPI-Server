@@ -14,29 +14,22 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 
 ## 구현 순서
 
-### M1. 시간 동기화와 지연 계측
+### M1. 장치 시간 기준선 측정 (완료)
 
 1. 카메라, Raspberry Pi, Windows의 현재 시간 상태와 공통 NTP 기준 offset을
    read-only 도구로 수집한다.
-2. 수집 결과를 검토한 뒤 세 장치가 같은 NTP 기준을 사용하게 한다.
-3. 저장/로그/프로토콜 시각은 UTC로 통일한다.
-4. 같은 장치 내부 구간 측정에는 monotonic clock을 사용한다.
-5. Qt에서 packet receive, decode complete, GUI render 시각을 분리한다.
-6. 카메라 직접 연결, 기존 RTSPS proxy, 새 VMS live 경로를 같은 조건으로 비교한다.
-
-성능 목표:
-
-- live 영상 end-to-end `T7 - T0`는 `200ms 이하`를 기준으로 한다.
-- p50/p95/max를 함께 기록하고 각 값의 기준 충족 여부를 판정한다.
-- clock offset, NTP/ICMP/HTTP RTT, Qt GUI queue 지연을 end-to-end 지연으로 대신하지
-  않는다.
+2. NTP 요청 간격, offset 계산 부호, 측정 불확실성을 검증한다.
+3. clock offset, NTP/ICMP/HTTP RTT와 영상 지연을 서로 다른 값으로 기록한다.
+4. 저장/로그/protocol timestamp는 UTC, 같은 장치 내부 지연은 monotonic clock을
+   사용한다는 기준을 확정한다.
 
 완료 조건:
 
-- clock offset을 확인할 수 있다.
-- Qt의 `delay`가 GUI queue 지연과 end-to-end 지연으로 구분된다.
-- 평균뿐 아니라 p50/p95/max와 frame drop 수를 기록한다.
-- 실제 end-to-end 결과를 200ms 기준과 비교한다.
+- camera/Pi/Windows의 clock offset을 같은 NTP peer 기준으로 확인할 수 있다.
+- 실제 측정 결과와 해석 한계를 문서에 기록한다.
+- offset 값을 영상 end-to-end 지연으로 사용하지 않는다.
+
+카메라 NTP 설정 변경과 영상 end-to-end 측정은 M1 완료 조건이 아니다.
 
 ### M2. 단일 채널 ChannelIngest
 
@@ -92,12 +85,23 @@ live fan-out, playback server, SUNAPI event gate는 구현되지 않았다.
 3. MP4 segment 직접 제공과 무손실 remux export를 지원한다.
 4. Qt control TLS 연결에서 login, channel status, timeline, playback 명령을 처리한다.
 
+### M9. Qt viewer 연동과 end-to-end 지연 검증
+
+선행 조건:
+
+- Qt viewer가 camera direct, 기존 proxy, VMS live 경로를 실제로 재생할 수 있다.
+- M3 live server가 client session과 독립된 ingest를 제공한다.
+- Pi와 Qt 내부 구간에 monotonic timestamp를 기록할 수 있다.
+
+1. 카메라가 밀리초 스톱워치 또는 시계를 촬영하도록 한다.
+2. 실제 화면과 Qt viewer를 한 프레임에 담는 glass-to-glass 방식으로 측정한다.
+3. camera direct, 기존 proxy, VMS live 경로의 p50/p95/max와 frame drop을 비교한다.
+4. live 영상 end-to-end 기준 `200ms 이하` 충족 여부를 판정한다.
+5. 필요할 때만 T0..T7 구간 계측으로 병목을 세분화한다.
+
 ## 바로 다음 작업
 
-1. M1-B에서 Qt `StreamWorker`와 GStreamer ingest의 단계별 monotonic timestamp
-   구조를 설계한다.
-2. camera direct / existing proxy의 영상 end-to-end p50/p95/max를 측정하고 200ms
-   기준과 비교한다.
-3. 구간별 병목을 확인한 뒤 Qt queue와 VMS live branch의 latency 정책을 결정한다.
-4. camera NTP/SyncType 설정은 별도 승인 전까지 변경하지 않는다.
-5. 그 다음 단일 채널 `ChannelIngest`로 recorder 구조를 바꾼다.
+1. M2에서 단일 채널 `ChannelIngest`로 recorder 구조를 바꾼다.
+2. M3에서 client session과 독립된 live server 경로를 만든다.
+3. Qt 연동과 end-to-end 측정은 선행 경로가 준비된 뒤 M9에서 수행한다.
+4. camera NTP/SyncType 설정은 필요한 기능과 영향 범위를 정한 별도 task에서 다룬다.

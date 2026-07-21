@@ -24,11 +24,11 @@ docs/vms-development-roadmap-ko.md를 읽어라.
 권장 task 이름:
 
 ```text
-[RPi-VMS M1-B] 영상 end-to-end 200ms baseline 계측
 [RPi-VMS M2] 단일 채널 ChannelIngest
 [RPi-VMS M3] shared live RTSP/RTSPS server
 [RPi-VMS M4] 4채널 ChannelManager 및 부하 시험
 [RPi-VMS M6] systemd, mount dependency, journald
+[RPi-VMS M9] Qt viewer 연동과 영상 end-to-end 200ms 검증
 ```
 
 ## Qt Viewer task

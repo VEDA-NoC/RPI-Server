@@ -1,5 +1,9 @@
 # VMS 지연 측정 기준
 
+이 문서는 M9에서 사용하는 측정 기준이다. M1 clock offset 측정이 끝났다는 이유만으로
+바로 실행하지 않는다. Qt viewer의 실제 재생 경로와 M3 VMS live server가 준비된 뒤
+glass-to-glass 측정을 먼저 수행한다.
+
 ## 성능 목표와 현재 판정
 
 live 영상의 end-to-end 목표는 다음과 같다.
@@ -9,7 +13,7 @@ end_to_end = T7(Qt GUI render) - T0(camera encoder timestamp) <= 200ms
 ```
 
 측정 보고에는 p50/p95/max를 모두 기록하고 각 값이 200ms 기준을 만족하는지 명시한다.
-현재 M1-A는 장치 시계 offset을 측정했을 뿐 T0와 T7을 아직 계측하지 않았으므로 이
+M1은 장치 시계 offset을 측정했을 뿐 T0와 T7을 계측하지 않았으므로 이
 목표를 검증하지 못했다. 사용자가 육안으로 확인한 약 500ms도 정량 측정값은 아니지만,
 실제값이 비슷하다면 200ms 목표의 약 2.5배이므로 이후 baseline 측정과 병목 분해가
 필요하다.
@@ -67,6 +71,14 @@ NTP 표본의 offset은 `reference - local`, 최종 장치 간 offset은
 카메라 상대 offset에는 기본 ±500ms 불확실성이 있다. SUNAPI 2.6.8은 요청 처리 중
 `UTCTime`을 캡처하는 정확한 시점을 정의하지 않으므로, 도구가 출력하는 카메라
 불확실성은 초 단위 양자화와 측정 RTT만 반영한 하한 추정치다.
+
+## 실행 선행 조건
+
+- Qt viewer가 camera direct, 기존 proxy, VMS live 경로를 재생할 수 있음
+- 비교할 codec/profile/해상도/GOP 조건을 고정할 수 있음
+- 동일 화면에서 실제 스톱워치와 Qt 영상을 함께 촬영할 수 있음
+
+선행 조건이 없으면 수식이나 계측 코드부터 추가하지 않는다.
 
 ## 측정 구간
 
