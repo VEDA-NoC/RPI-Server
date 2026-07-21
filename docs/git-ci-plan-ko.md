@@ -5,14 +5,14 @@
 `ChannelIngest`, live fan-out, 4채널 `ChannelManager`처럼 구조 변경이 시작되기
 전에 Git 저장소를 만든다. 현재 단일 채널 녹화 성공 상태를 첫 baseline으로 보존한다.
 
-권장 Git 저장소 루트는 독립 제품 폴더인 `outputs/rpi-vms`다. SUNAPI PDF와 `work`
-추출 파일은 저장소 밖의 참고 자료로 유지한다.
+Git 저장소 루트는 workspace의 `agent-rules/active-worktree-ko.md`가 지정한다. SUNAPI
+PDF와 추출 중간 파일은 저장소 밖의 참고 자료로 유지한다.
 
 ## 현재 구현 상태
 
 2026-07-16 기준:
 
-- 로컬 Git 저장소 루트: `outputs/rpi-vms`
+- 로컬 Git 저장소 루트: 활성 worktree
 - baseline commit: `fa6ccad`
 - clang-format 19 commit: `5b935ae`
 - CI commit: `170727b`
@@ -30,7 +30,7 @@
 
 ## Formatting
 
-- RPi C++: `outputs/rpi-vms/.clang-format`
+- RPi C++: 활성 저장소 루트의 `.clang-format`
 - Qt C++: Qt 프로젝트 루트의 별도 `.clang-format`
 - 가장 가까운 `.clang-format`이 해당 코드의 규칙이다.
 - 완료 전에 수정한 C/C++ 파일에만 `clang-format -i`를 실행한다.

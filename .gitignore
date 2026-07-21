@@ -8,10 +8,13 @@ CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
 *.o
+__pycache__/
+*.pyc
 
 # Runtime data
 recordings/
 index/
+measurements/
 *.db
 *.db-shm
 *.db-wal
