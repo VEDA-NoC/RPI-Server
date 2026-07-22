@@ -11,7 +11,7 @@ APP_SRCS = \
 	src/config/app_config.cpp \
 	src/logging/logger.cpp \
 	src/db/recording_index.cpp \
-	src/media/gstreamer_recorder.cpp \
+	src/media/channel_ingest.cpp \
 	src/storage/storage_manager.cpp \
 	src/main.cpp
 

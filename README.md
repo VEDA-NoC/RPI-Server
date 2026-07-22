@@ -2,14 +2,16 @@
 
 Hanwha Vision Network camera의 원본 H.264/H.265 stream을 Raspberry Pi에서 녹화하고, 이후 live fan-out·event recording·playback으로 확장하는 VMS 프로젝트입니다.
 
-현재 구현은 단일 채널 연속 녹화 PoC입니다.
+현재 구현은 프로세스가 소유하는 단일 채널 `ChannelIngest`입니다. RTSP ingest는 향후
+live client session과 독립적으로 유지되며 오류/EOS 뒤 재연결합니다.
 
 ```text
 camera channel 0
   -> RTSP over TCP / Digest
   -> RTP depayload / codec parse
-  -> MP4 segment
-  -> VMS channel 1 storage + SQLite index
+  -> tee
+     -> non-leaky recording queue -> MP4 segment -> SQLite index
+     -> leaky/latest live queue -> M3 LiveFrameSink 경계
 ```
 
 ## 채널과 경로 기준
@@ -84,9 +86,11 @@ bash tools/sync-to-pi.sh --build
   --channel-id 1 \
   --codec h264 \
   --segment-seconds 60 \
+  --reconnect-delay-ms 2000 \
   --require-storage-mount \
   --log-level info
 ```
 
-현재 코드는 camera URI를 내부에서 만들고 GStreamer `rtspsrc`가 Digest 인증을
-처리합니다. recording/live 경로는 transcoding하지 않습니다. `ChannelIngest`, shared live server, event gate, playback를 구현해야 합니다.
+현재 코드는 userinfo가 없는 camera URI를 내부에서 만들고 credential은 `rtspsrc`
+속성으로 전달하여 Digest 인증을 처리합니다. recording/live 경로는 transcoding하지
+않습니다. 외부 shared live server, event gate, playback은 아직 구현하지 않았습니다.

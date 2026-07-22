@@ -26,7 +26,7 @@ jobs:
 
       - name: Check C and C++ formatting
         run: |
-          find include src tools -type f \
+          find include src tests tools -type f \
             \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' \) \
             -print0 \
             | xargs -0 --no-run-if-empty clang-format-19 --dry-run --Werror --style=file
@@ -52,7 +52,7 @@ jobs:
             --suppress=missingIncludeSystem \
             --std=c++17 \
             -I include \
-            src tools/test_rtsps_client.cpp
+            src tests tools/test_rtsps_client.cpp
 
   build:
     name: x86_64 build and smoke test
@@ -69,6 +69,7 @@ jobs:
             g++ \
             libgstreamer1.0-dev \
             libsqlite3-dev \
+            gstreamer1.0-plugins-base \
             ninja-build \
             pkg-config
 
@@ -83,6 +84,9 @@ jobs:
 
       - name: Run CLI smoke test
         run: ./build/rpi_vms --help
+
+      - name: Run C++ unit tests
+        run: ctest --test-dir build --output-on-failure
 
       - name: Test time offset measurement tool
         run: python3 -m unittest tools/test_measure_time_offsets.py

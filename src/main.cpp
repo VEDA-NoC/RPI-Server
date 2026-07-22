@@ -9,7 +9,7 @@
 #include <string>
 
 #include "rtsps/app_config.h"
-#include "rtsps/gstreamer_recorder.h"
+#include "rtsps/channel_ingest.h"
 #include "rtsps/logger.h"
 #include "rtsps/recording_index.h"
 #include "rtsps/storage_manager.h"
@@ -33,6 +33,7 @@ struct VmsConfig {
     rtsps::VideoCodec codec = rtsps::VideoCodec::H264;
     int latency_ms = 200;
     int segment_seconds = 60;
+    int reconnect_delay_ms = 2000;
     std::uintmax_t min_free_bytes = 1024ULL * 1024ULL * 1024ULL;
     bool require_storage_mount = false;
     rtsps::LogLevel log_level = rtsps::LogLevel::Info;
@@ -82,6 +83,7 @@ void print_usage(const char* program) {
               << "  --codec h264|h265\n"
               << "  --latency-ms 200\n"
               << "  --segment-seconds 60\n"
+              << "  --reconnect-delay-ms 2000\n"
               << "  --min-free-bytes 1073741824\n"
               << "  --require-storage-mount\n"
               << "  --log-level error|warn|info|debug|trace\n";
@@ -124,6 +126,8 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.latency_ms = parse_int(arg, need_value(arg), 0, 10000);
         else if (arg == "--segment-seconds")
             config.segment_seconds = parse_int(arg, need_value(arg), 1, 3600);
+        else if (arg == "--reconnect-delay-ms")
+            config.reconnect_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--min-free-bytes")
             config.min_free_bytes = parse_size(arg, need_value(arg));
         else if (arg == "--require-storage-mount")
@@ -140,6 +144,10 @@ VmsConfig parse_vms_args(int argc, char** argv) {
 
     if (config.camera_host.empty()) {
         throw std::runtime_error("--camera-host is required");
+    }
+    if (config.camera_host.find_first_of("/@ \t\r\n") != std::string::npos ||
+        config.camera_host.find("://") != std::string::npos) {
+        throw std::runtime_error("--camera-host must be a host without scheme, path, or userinfo");
     }
     if (config.camera_user.empty()) {
         throw std::runtime_error("--camera-user is required");
@@ -162,24 +170,7 @@ std::string replace_all(std::string value, const std::string& from, const std::s
     return value;
 }
 
-std::string url_escape_userinfo(const std::string& value) {
-    std::string out;
-    constexpr char hex[] = "0123456789ABCDEF";
-    for (unsigned char ch : value) {
-        const bool safe = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
-                          ch == '-' || ch == '.' || ch == '_' || ch == '~';
-        if (safe) {
-            out.push_back(static_cast<char>(ch));
-        } else {
-            out.push_back('%');
-            out.push_back(hex[ch >> 4]);
-            out.push_back(hex[ch & 0x0F]);
-        }
-    }
-    return out;
-}
-
-std::string build_camera_rtsp_url(const VmsConfig& config) {
+std::string build_camera_rtsp_location(const VmsConfig& config) {
     const std::string camera_channel = std::to_string(config.camera_channel);
     std::string path = replace_all(config.camera_path_template, "{camera_channel}", camera_channel);
     path = replace_all(path, "{channel}", camera_channel);
@@ -187,8 +178,7 @@ std::string build_camera_rtsp_url(const VmsConfig& config) {
         path.insert(path.begin(), '/');
     }
 
-    return "rtsp://" + url_escape_userinfo(config.camera_user) + ":" + url_escape_userinfo(config.camera_password) +
-           "@" + config.camera_host + ":" + std::to_string(config.camera_port) + path;
+    return "rtsp://" + config.camera_host + ":" + std::to_string(config.camera_port) + path;
 }
 
 }  // namespace
@@ -220,16 +210,21 @@ int main(int argc, char** argv) {
         logger.info("[channel] channel_id=" + std::to_string(config.channel_id) +
                     " camera_channel=" + std::to_string(config.camera_channel) + " storage=" + output_dir);
 
-        rtsps::GStreamerRecorderConfig recorder_config;
-        recorder_config.rtsp_url = build_camera_rtsp_url(config);
-        recorder_config.output_dir = output_dir;
-        recorder_config.channel_id = config.channel_id;
-        recorder_config.codec = config.codec;
-        recorder_config.latency_ms = config.latency_ms;
-        recorder_config.segment_seconds = config.segment_seconds;
+        rtsps::ChannelIngestConfig ingest_config;
+        ingest_config.rtsp_location = build_camera_rtsp_location(config);
+        ingest_config.camera_user = config.camera_user;
+        ingest_config.camera_password = config.camera_password;
+        ingest_config.output_dir = output_dir;
+        ingest_config.camera_channel = config.camera_channel;
+        ingest_config.channel_id = config.channel_id;
+        ingest_config.codec = config.codec;
+        ingest_config.latency_ms = config.latency_ms;
+        ingest_config.segment_seconds = config.segment_seconds;
+        ingest_config.reconnect_delay_ms = config.reconnect_delay_ms;
 
-        rtsps::GStreamerRecorder recorder(recorder_config, index, logger, g_running);
-        return recorder.run();
+        // Process-owned ingest lifetime is independent of future live client sessions.
+        rtsps::ChannelIngest ingest(ingest_config, index, logger, g_running);
+        return ingest.run();
     } catch (const std::exception& ex) {
         std::cerr << "error: " << ex.what() << "\n";
         return 1;
