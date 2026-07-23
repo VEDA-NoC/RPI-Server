@@ -31,7 +31,7 @@ struct ManagedChannelStats {
 class ChannelManager {
 public:
     ChannelManager(std::vector<ChannelIngestConfig> configs, RecordingIndex& index, Logger& logger,
-                   std::atomic<bool>& running, LiveFrameSink* live_sink);
+                   std::atomic<bool>& running, LiveFrameSink* live_sink, int channel_start_delay_ms = 0);
     ~ChannelManager();
 
     ChannelManager(const ChannelManager&) = delete;
@@ -47,6 +47,7 @@ private:
     Logger& logger_;
     std::atomic<bool>& running_;
     std::vector<std::unique_ptr<ChannelWorker>> workers_;
+    int channel_start_delay_ms_ = 0;
     bool started_ = false;
 };
 

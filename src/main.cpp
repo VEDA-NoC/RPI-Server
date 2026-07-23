@@ -44,6 +44,7 @@ struct VmsConfig {
     int segment_seconds = 60;
     int reconnect_delay_ms = 2000;
     int ingest_startup_timeout_ms = 15000;
+    int channel_start_delay_ms = 5000;
     std::string live_listen_host = "0.0.0.0";
     int rtsp_port = 0;
     int rtsps_port = 8554;
@@ -106,6 +107,7 @@ void print_usage(const char* program) {
               << "  --segment-seconds 60\n"
               << "  --reconnect-delay-ms 2000\n"
               << "  --ingest-startup-timeout-ms 15000\n"
+              << "  --channel-start-delay-ms 5000\n"
               << "  --live-listen-host 0.0.0.0\n"
               << "  --rtsp-port 0 (plain RTSP disabled by default)\n"
               << "  --rtsps-port 8554 (0 disables RTSPS)\n"
@@ -168,6 +170,8 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.reconnect_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--ingest-startup-timeout-ms")
             config.ingest_startup_timeout_ms = parse_int(arg, need_value(arg), 1000, 300000);
+        else if (arg == "--channel-start-delay-ms")
+            config.channel_start_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--live-listen-host")
             config.live_listen_host = need_value(arg);
         else if (arg == "--rtsp-port")
@@ -328,7 +332,8 @@ int main(int argc, char** argv) {
         rtsps::LiveRtspServer live_server(live_config, logger, g_running);
         live_server.start();
 
-        rtsps::ChannelManager channel_manager(std::move(ingest_configs), index, logger, g_running, &live_server);
+        rtsps::ChannelManager channel_manager(std::move(ingest_configs), index, logger, g_running, &live_server,
+                                              config.channel_start_delay_ms);
         channel_manager.start();
         while (g_running.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));

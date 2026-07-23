@@ -1,8 +1,11 @@
 #include "rtsps/channel_manager.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 
 namespace rtsps {
@@ -84,10 +87,13 @@ struct ChannelManager::ChannelWorker {
 };
 
 ChannelManager::ChannelManager(std::vector<ChannelIngestConfig> configs, RecordingIndex& index, Logger& logger,
-                               std::atomic<bool>& running, LiveFrameSink* live_sink)
-    : logger_(logger), running_(running) {
+                               std::atomic<bool>& running, LiveFrameSink* live_sink, int channel_start_delay_ms)
+    : logger_(logger), running_(running), channel_start_delay_ms_(channel_start_delay_ms) {
     if (configs.empty() || configs.size() > 4) {
         throw std::runtime_error("ChannelManager requires 1 to 4 channels");
+    }
+    if (channel_start_delay_ms_ < 0) {
+        throw std::runtime_error("channel_start_delay_ms must not be negative");
     }
     std::array<bool, 4> camera_seen{};
     std::array<bool, 5> channel_seen{};
@@ -112,8 +118,12 @@ void ChannelManager::start() {
         return;
     }
     started_ = true;
-    for (auto& worker : workers_) {
+    for (std::size_t index = 0; index < workers_.size(); ++index) {
+        auto& worker = workers_[index];
         ChannelWorker* const current = worker.get();
+        logger_.info("[channel-manager] state=starting channel_id=" + std::to_string(current->mapping.channel_id) +
+                     " camera_channel=" + std::to_string(current->mapping.camera_channel) +
+                     " ordinal=" + std::to_string(index + 1) + "/" + std::to_string(workers_.size()));
         current->thread = std::thread([this, current]() {
             try {
                 current->ingest.run();
@@ -135,6 +145,21 @@ void ChannelManager::start() {
                               std::to_string(current->mapping.channel_id) + " message=unknown");
             }
         });
+        if (index + 1 < workers_.size() && channel_start_delay_ms_ > 0) {
+            const auto& next = workers_[index + 1];
+            logger_.info(
+                "[channel-manager] state=start_delay next_channel_id=" + std::to_string(next->mapping.channel_id) +
+                " delay_ms=" + std::to_string(channel_start_delay_ms_));
+            int remaining_ms = channel_start_delay_ms_;
+            while (running_.load() && remaining_ms > 0) {
+                const int wait_ms = std::min(remaining_ms, 100);
+                std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+                remaining_ms -= wait_ms;
+            }
+            if (!running_.load()) {
+                break;
+            }
+        }
     }
 }
 

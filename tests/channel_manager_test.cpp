@@ -167,6 +167,45 @@ void test_channel_failures_reconnect_independently() {
     std::filesystem::remove_all(root);
 }
 
+void test_channel_workers_start_with_configured_spacing() {
+    const auto root = temporary_root("rpi-vms-channel-manager-start-delay");
+    rtsps::Logger logger(rtsps::LogLevel::Error);
+    rtsps::RecordingIndex index((root / "media.db").string(), logger, 100);
+    index.open();
+    index.initialize_schema();
+
+    std::vector<rtsps::ChannelIngestConfig> configs;
+    for (int channel_id = 1; channel_id <= 3; ++channel_id) {
+        rtsps::ChannelIngestConfig config;
+        config.rtsp_location = "rtsp://127.0.0.1:" + std::to_string(channel_id) + "/unreachable";
+        config.camera_user = "unit-user";
+        config.camera_password = "unit-password";
+        config.output_dir = (root / ("ch" + std::to_string(channel_id))).string();
+        config.camera_channel = channel_id - 1;
+        config.channel_id = channel_id;
+        config.reconnect_delay_ms = 10;
+        configs.push_back(std::move(config));
+    }
+
+    std::atomic<bool> running{true};
+    rtsps::ChannelManager manager(std::move(configs), index, logger, running, nullptr, 150);
+    const auto start = std::chrono::steady_clock::now();
+    manager.start();
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    require(elapsed.count() >= 250 && elapsed.count() < 1000,
+            "manager did not apply spacing between initial channel starts");
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    manager.stop();
+
+    const auto stats = manager.stats();
+    require(stats.size() == 3, "start-delay manager did not retain three workers");
+    for (const auto& channel : stats) {
+        require(channel.ingest.connection_attempts >= 1, "start-delay manager did not start every worker");
+    }
+    std::filesystem::remove_all(root);
+}
+
 }  // namespace
 
 int main() {
@@ -174,6 +213,7 @@ int main() {
     test_shared_writer_serialization_and_channel_ids();
     test_busy_timeout_waits_for_external_writer();
     test_channel_failures_reconnect_independently();
+    test_channel_workers_start_with_configured_spacing();
     std::cout << "channel_manager_test: PASS\n";
     return 0;
 }

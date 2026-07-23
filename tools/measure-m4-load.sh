@@ -12,6 +12,7 @@ result_dir="${M4_RESULT_DIR:-/tmp/rpi-vms-m4-load}"
 enable_rtsps_clients="${M4_LOAD_RTSPS_CLIENTS:-1}"
 startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
 readiness_timeout_seconds="${M4_INGEST_READINESS_TIMEOUT_SECONDS:-150}"
+channel_start_delay_ms="${M4_CHANNEL_START_DELAY_MS:-5000}"
 
 for command in findmnt ip ping getconf awk sqlite3 openssl; do
     command -v "$command" >/dev/null || {
@@ -41,6 +42,10 @@ fi
 }
 [[ "$readiness_timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
     echo 'FAIL: M4_INGEST_READINESS_TIMEOUT_SECONDS must be a positive integer' >&2
+    exit 1
+}
+[[ "$channel_start_delay_ms" =~ ^[0-9]+$ ]] || {
+    echo 'FAIL: M4_CHANNEL_START_DELAY_MS must be a non-negative integer' >&2
     exit 1
 }
 pgrep -x rpi_vms >/dev/null && {
@@ -141,6 +146,7 @@ run_case() {
         --storage-root "$storage_root" \
         --segment-seconds 60 \
         --ingest-startup-timeout-ms "$startup_timeout_ms" \
+        --channel-start-delay-ms "$channel_start_delay_ms" \
         --db-busy-timeout-ms 5000 \
         --require-storage-mount \
         --rtsp-port 0 \
@@ -153,7 +159,7 @@ run_case() {
 
     local streaming=0
     local previous_streaming=-1
-    echo "INFO: $label waiting up to ${readiness_timeout_seconds}s for camera ingest (first-buffer timeout ${startup_timeout_ms}ms)"
+    echo "INFO: $label waiting up to ${readiness_timeout_seconds}s for camera ingest (first-buffer timeout ${startup_timeout_ms}ms, channel start delay ${channel_start_delay_ms}ms)"
     for elapsed_seconds in $(seq 0 $((readiness_timeout_seconds - 1))); do
         streaming="$(sed -n \
             '/state=streaming first_buffer=yes/s/.*channel_id=\([1-4]\).*/\1/p' "$log" | sort -u | wc -l)"

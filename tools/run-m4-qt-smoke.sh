@@ -7,6 +7,7 @@ storage_root="${M4_STORAGE_ROOT:-/mnt/vms-storage}"
 tls_cert="${M4_TLS_CERT:-certs/server.crt}"
 tls_key="${M4_TLS_KEY:-certs/server.key}"
 startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
+channel_start_delay_ms="${M4_CHANNEL_START_DELAY_MS:-5000}"
 app_log="${M4_APP_LOG:-/tmp/rpi-vms-m4-qt-smoke.log}"
 
 for command in openssl awk; do
@@ -17,6 +18,10 @@ for command in openssl awk; do
 done
 [[ -x "$app" ]] || {
     echo "FAIL: app is not executable: $app" >&2
+    exit 1
+}
+[[ "$channel_start_delay_ms" =~ ^[0-9]+$ ]] || {
+    echo 'FAIL: M4_CHANNEL_START_DELAY_MS must be a non-negative integer' >&2
     exit 1
 }
 if [[ ! -r "$tls_cert" || ! -r "$tls_key" ]]; then
@@ -70,6 +75,7 @@ trap cleanup EXIT INT TERM
     --segment-seconds 60 \
     --reconnect-delay-ms 2000 \
     --ingest-startup-timeout-ms "$startup_timeout_ms" \
+    --channel-start-delay-ms "$channel_start_delay_ms" \
     --require-storage-mount \
     --rtsp-port 0 \
     --rtsps-port 8554 \

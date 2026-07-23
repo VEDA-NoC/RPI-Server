@@ -10,6 +10,8 @@ tls_key="${M4_TLS_KEY:-certs/server.key}"
 run_seconds="${M4_RUN_SECONDS:-75}"
 startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
 readiness_timeout_seconds="${M4_INGEST_READINESS_TIMEOUT_SECONDS:-150}"
+channel_start_delay_ms="${M4_CHANNEL_START_DELAY_MS:-5000}"
+startup_only="${M4_STARTUP_ONLY:-0}"
 app_log="${M4_APP_LOG:-/tmp/rpi-vms-m4-integration.log}"
 
 for command in openssl python3 sqlite3; do
@@ -30,6 +32,14 @@ done
 }
 [[ "$readiness_timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
     echo 'FAIL: M4_INGEST_READINESS_TIMEOUT_SECONDS must be a positive integer' >&2
+    exit 1
+}
+[[ "$channel_start_delay_ms" =~ ^[0-9]+$ ]] || {
+    echo 'FAIL: M4_CHANNEL_START_DELAY_MS must be a non-negative integer' >&2
+    exit 1
+}
+[[ "$startup_only" == 0 || "$startup_only" == 1 ]] || {
+    echo 'FAIL: M4_STARTUP_ONLY must be 0 or 1' >&2
     exit 1
 }
 if pgrep -x rpi_vms >/dev/null; then
@@ -100,6 +110,7 @@ trap cleanup EXIT INT TERM
     --codec h264 \
     --segment-seconds 60 \
     --ingest-startup-timeout-ms "$startup_timeout_ms" \
+    --channel-start-delay-ms "$channel_start_delay_ms" \
     --db-busy-timeout-ms 5000 \
     --require-storage-mount \
     --rtsp-port 0 \
@@ -112,7 +123,7 @@ trap cleanup EXIT INT TERM
 app_pid=$!
 exec 3<&-
 
-echo "INFO: waiting up to ${readiness_timeout_seconds}s for all four camera ingest channels (first-buffer timeout ${startup_timeout_ms}ms)"
+echo "INFO: waiting up to ${readiness_timeout_seconds}s for all four camera ingest channels (first-buffer timeout ${startup_timeout_ms}ms, channel start delay ${channel_start_delay_ms}ms)"
 previous_streaming_channels=-1
 for elapsed_seconds in $(seq 0 $((readiness_timeout_seconds - 1))); do
     streaming_channels="$(sed -n \
@@ -141,6 +152,29 @@ if [[ "${streaming_channels:-0}" -ne 4 ]]; then
     exit 1
 fi
 echo 'PASS: camera channels 0..3 are streaming as VMS channels 1..4'
+
+if [[ "$startup_only" == 1 ]]; then
+    initial_reconnects="$(grep -c 'state=reconnecting' "$app_log" || true)"
+    kill -INT "$app_pid" 2>/dev/null || true
+    set +e
+    wait "$app_pid"
+    app_status=$?
+    set -e
+    app_pid=''
+    echo '=== startup log ==='
+    grep -E 'channel-manager|state=connecting|state=streaming|pipeline_error|reconnecting|state=stopped' \
+        "$app_log" || true
+    if [[ "$app_status" -ne 0 ]]; then
+        echo "FAIL: startup-only app exit status=$app_status" >&2
+        exit 1
+    fi
+    if [[ "$initial_reconnects" -ne 0 ]]; then
+        echo "FAIL: four channels became ready after initial reconnects=$initial_reconnects" >&2
+        exit 1
+    fi
+    echo 'PASS: four channels became ready without an initial reconnect'
+    exit 0
+fi
 
 (
     sleep "$run_seconds"
