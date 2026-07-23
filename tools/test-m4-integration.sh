@@ -8,6 +8,8 @@ storage_root="${M4_STORAGE_ROOT:-/mnt/vms-storage}"
 tls_cert="${M4_TLS_CERT:-certs/server.crt}"
 tls_key="${M4_TLS_KEY:-certs/server.key}"
 run_seconds="${M4_RUN_SECONDS:-75}"
+startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
+readiness_timeout_seconds="${M4_INGEST_READINESS_TIMEOUT_SECONDS:-150}"
 app_log="${M4_APP_LOG:-/tmp/rpi-vms-m4-integration.log}"
 
 for command in openssl python3 sqlite3; do
@@ -22,6 +24,14 @@ for executable in "$app" "$client"; do
         exit 1
     }
 done
+[[ "$startup_timeout_ms" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'FAIL: M4_INGEST_STARTUP_TIMEOUT_MS must be a positive integer' >&2
+    exit 1
+}
+[[ "$readiness_timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'FAIL: M4_INGEST_READINESS_TIMEOUT_SECONDS must be a positive integer' >&2
+    exit 1
+}
 if pgrep -x rpi_vms >/dev/null; then
     echo 'FAIL: another rpi_vms process is already running' >&2
     pgrep -af rpi_vms >&2
@@ -89,6 +99,7 @@ trap cleanup EXIT INT TERM
     --storage-root "$storage_root" \
     --codec h264 \
     --segment-seconds 60 \
+    --ingest-startup-timeout-ms "$startup_timeout_ms" \
     --db-busy-timeout-ms 5000 \
     --require-storage-mount \
     --rtsp-port 0 \
@@ -101,14 +112,30 @@ trap cleanup EXIT INT TERM
 app_pid=$!
 exec 3<&-
 
-for _ in $(seq 1 60); do
+echo "INFO: waiting up to ${readiness_timeout_seconds}s for all four camera ingest channels (first-buffer timeout ${startup_timeout_ms}ms)"
+previous_streaming_channels=-1
+for elapsed_seconds in $(seq 0 $((readiness_timeout_seconds - 1))); do
     streaming_channels="$(sed -n \
         '/state=streaming first_buffer=yes/s/.*channel_id=\([1-4]\).*/\1/p' "$app_log" | sort -u | wc -l)"
+    if [[ "$streaming_channels" -ne "$previous_streaming_channels" ]] || ((elapsed_seconds % 10 == 0)); then
+        echo "INFO: ingest readiness elapsed=${elapsed_seconds}s streaming=${streaming_channels}/4"
+        previous_streaming_channels="$streaming_channels"
+    fi
     [[ "$streaming_channels" -eq 4 ]] && break
     kill -0 "$app_pid" 2>/dev/null || break
     sleep 1
 done
 if [[ "${streaming_channels:-0}" -ne 4 ]]; then
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        set +e
+        wait "$app_pid"
+        app_status=$?
+        set -e
+        app_pid=''
+        echo "FAIL: app exited before all channels reached streaming, status=$app_status" >&2
+        sed -n '1,160p' "$app_log" >&2
+        exit 1
+    fi
     echo "FAIL: expected four streaming channels, got ${streaming_channels:-0}" >&2
     grep -E 'state=connecting|first_buffer|pipeline_error|reconnecting|worker_failed' "$app_log" >&2 || true
     exit 1
@@ -134,7 +161,11 @@ python3 tools/test_slow_rtsp_client.py \
 client_pids+=("$!")
 client_labels+=("slow-ch1")
 
-sleep 40
+echo 'INFO: running four 20s RTSPS clients and one 35s slow client'
+for elapsed_seconds in 10 20 30 40; do
+    sleep 10
+    echo "INFO: RTSPS client phase elapsed=${elapsed_seconds}s/40s"
+done
 client_failures=0
 for index in "${!client_pids[@]}"; do
     pid="${client_pids[$index]}"

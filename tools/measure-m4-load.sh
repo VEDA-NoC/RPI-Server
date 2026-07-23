@@ -10,6 +10,8 @@ tls_key="${M4_TLS_KEY:-certs/server.key}"
 duration="${M4_MEASURE_SECONDS:-120}"
 result_dir="${M4_RESULT_DIR:-/tmp/rpi-vms-m4-load}"
 enable_rtsps_clients="${M4_LOAD_RTSPS_CLIENTS:-1}"
+startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
+readiness_timeout_seconds="${M4_INGEST_READINESS_TIMEOUT_SECONDS:-150}"
 
 for command in findmnt ip ping getconf awk sqlite3 openssl; do
     command -v "$command" >/dev/null || {
@@ -31,6 +33,14 @@ if [[ "$enable_rtsps_clients" == 1 && ! -x "$client" ]]; then
 fi
 [[ "$duration" =~ ^[1-9][0-9]*$ ]] || {
     echo 'FAIL: M4_MEASURE_SECONDS must be a positive integer' >&2
+    exit 1
+}
+[[ "$startup_timeout_ms" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'FAIL: M4_INGEST_STARTUP_TIMEOUT_MS must be a positive integer' >&2
+    exit 1
+}
+[[ "$readiness_timeout_seconds" =~ ^[1-9][0-9]*$ ]] || {
+    echo 'FAIL: M4_INGEST_READINESS_TIMEOUT_SECONDS must be a positive integer' >&2
     exit 1
 }
 pgrep -x rpi_vms >/dev/null && {
@@ -121,6 +131,7 @@ run_case() {
     local samples="$result_dir/${label}-samples.csv"
     local client_log_prefix="$result_dir/${label}-rtsps"
 
+    echo "INFO: starting $label with $expected_channels channel(s)"
     "$app" \
         --camera-host "$camera_host" \
         --camera-user admin \
@@ -129,6 +140,7 @@ run_case() {
         --channel-map "$mapping" \
         --storage-root "$storage_root" \
         --segment-seconds 60 \
+        --ingest-startup-timeout-ms "$startup_timeout_ms" \
         --db-busy-timeout-ms 5000 \
         --require-storage-mount \
         --rtsp-port 0 \
@@ -140,14 +152,30 @@ run_case() {
     app_pid=$!
 
     local streaming=0
-    for _ in $(seq 1 60); do
+    local previous_streaming=-1
+    echo "INFO: $label waiting up to ${readiness_timeout_seconds}s for camera ingest (first-buffer timeout ${startup_timeout_ms}ms)"
+    for elapsed_seconds in $(seq 0 $((readiness_timeout_seconds - 1))); do
         streaming="$(sed -n \
             '/state=streaming first_buffer=yes/s/.*channel_id=\([1-4]\).*/\1/p' "$log" | sort -u | wc -l)"
+        if [[ "$streaming" -ne "$previous_streaming" ]] || ((elapsed_seconds % 10 == 0)); then
+            echo "INFO: $label ingest readiness elapsed=${elapsed_seconds}s streaming=${streaming}/${expected_channels}"
+            previous_streaming="$streaming"
+        fi
         [[ "$streaming" -eq "$expected_channels" ]] && break
         kill -0 "$app_pid" 2>/dev/null || break
         sleep 1
     done
     [[ "$streaming" -eq "$expected_channels" ]] || {
+        if ! kill -0 "$app_pid" 2>/dev/null; then
+            set +e
+            wait "$app_pid"
+            app_status=$?
+            set -e
+            app_pid=''
+            echo "FAIL: $label app exited before ingest was ready, status=$app_status" >&2
+            sed -n '1,160p' "$log" >&2
+            return 1
+        fi
         echo "FAIL: $label reached $streaming/$expected_channels streaming channels" >&2
         grep -E 'state=connecting|pipeline_error|reconnecting|worker_failed' "$log" >&2 || true
         return 1
@@ -174,6 +202,7 @@ run_case() {
             echo "FAIL: $label RTSPS clients reached TLS on ${tls_ready:-0}/$expected_channels channels" >&2
             return 1
         }
+        echo "INFO: $label RTSPS clients connected over TLS: ${tls_ready}/${expected_channels}"
     fi
 
     local start_ticks start_rss start_disk start_rx start_tx start_time
@@ -187,6 +216,7 @@ run_case() {
 
     local previous_ticks="$start_ticks"
     local previous_time="$start_time"
+    echo "INFO: $label measurement started duration=${duration}s"
     for second in $(seq 1 "$duration"); do
         sleep 1
         kill -0 "$app_pid" 2>/dev/null || {
@@ -202,6 +232,9 @@ run_case() {
         echo "$second,$cpu,$rss" >>"$samples"
         previous_ticks="$now_ticks"
         previous_time="$now_time"
+        if ((second == 1 || second % 10 == 0 || second == duration)); then
+            echo "INFO: $label measurement elapsed=${second}s/${duration}s cpu=${cpu}% rss=${rss}KiB"
+        fi
     done
 
     local end_ticks end_disk end_rx end_tx end_time ping_loss
@@ -247,6 +280,7 @@ run_case() {
     rtsps_client_count="$((enable_rtsps_clients * expected_channels))"
     echo "$label,$expected_channels,$rtsps_client_count,$elapsed,$cpu_average,$rss_average,$start_rss,$disk_bytes,$rx_bytes,$tx_bytes,$rtsps_interleaved_bytes,${ping_loss:-unknown}" \
         >>"$result_dir/summary.csv"
+    echo "PASS: $label measurement complete"
 }
 
 echo 'case,channels,rtsps_clients,elapsed_s,avg_cpu_percent,avg_rss_kib,start_rss_kib,usb_write_bytes,camera_net_rx_bytes,camera_net_tx_bytes,rtsps_interleaved_bytes,packet_loss' \

@@ -120,7 +120,7 @@ unset CAMERA_PASSWORD
 
 현재 코드는 userinfo가 없는 camera URI를 내부에서 만들고 credential은 `rtspsrc`
 속성으로 전달하여 Digest 인증을 처리합니다. recording/live 경로는 transcoding하지
-않습니다. 기본 live URL은 `rtsp://PI_IP:8554/ch1`부터 `/ch4`까지입니다. event gate와
+않습니다. 기본 live URL은 `rtsps://PI_IP:8554/ch1`부터 `/ch4`까지입니다. event gate와
 playback은 아직 구현하지 않았습니다.
 
 ## M3 통합 테스트
