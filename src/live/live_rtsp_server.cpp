@@ -166,15 +166,17 @@ std::string base64_encode(const std::vector<std::uint8_t>& input) {
     static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string output;
     output.reserve((input.size() + 2) / 3 * 4);
-    for (std::size_t i = 0; i < input.size(); i += 3) {
+    for (std::size_t i = 0; i < input.size();) {
+        const std::size_t remaining = input.size() - i;
         const std::uint32_t a = input[i];
-        const std::uint32_t b = i + 1 < input.size() ? input[i + 1] : 0;
-        const std::uint32_t c = i + 2 < input.size() ? input[i + 2] : 0;
+        const std::uint32_t b = remaining > 1 ? input[i + 1] : 0;
+        const std::uint32_t c = remaining > 2 ? input[i + 2] : 0;
         const std::uint32_t value = (a << 16U) | (b << 8U) | c;
         output.push_back(alphabet[(value >> 18U) & 0x3fU]);
         output.push_back(alphabet[(value >> 12U) & 0x3fU]);
-        output.push_back(i + 1 < input.size() ? alphabet[(value >> 6U) & 0x3fU] : '=');
-        output.push_back(i + 2 < input.size() ? alphabet[value & 0x3fU] : '=');
+        output.push_back(remaining > 1 ? alphabet[(value >> 6U) & 0x3fU] : '=');
+        output.push_back(remaining > 2 ? alphabet[value & 0x3fU] : '=');
+        i += std::min<std::size_t>(3, remaining);
     }
     return output;
 }
