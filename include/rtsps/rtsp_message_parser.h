@@ -14,7 +14,7 @@ struct ParserLimits {
 std::string lower_copy(std::string s);
 bool starts_with_ci(const std::string& s, const std::string& prefix);
 std::string replace_all(std::string s, const std::string& from, const std::string& to);
-std::string trim_copy(std::string s);
+std::string trim_copy(const std::string& s);
 std::vector<std::string> split_lines_keep_empty(const std::string& header);
 
 std::string get_first_line(const std::string& message);

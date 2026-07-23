@@ -244,6 +244,28 @@ std::string method_or_status(const std::string& message) {
     return "method=" + rtsp_method_from_request(message);
 }
 
+namespace {
+
+std::string redact_uri_userinfo(std::string text) {
+    for (const std::string& scheme : {std::string("rtsp://"), std::string("rtsps://")}) {
+        std::size_t search_from = 0;
+        while ((search_from = lower_copy(text).find(scheme, search_from)) != std::string::npos) {
+            const std::size_t start = search_from + scheme.size();
+            const std::size_t authority_end = text.find_first_of("/ \t\r\n", start);
+            const std::size_t at = text.find('@', start);
+            if (at != std::string::npos && (authority_end == std::string::npos || at < authority_end)) {
+                text.replace(start, at - start, "<redacted>");
+                search_from = start + std::string("<redacted>@").size();
+            } else {
+                search_from = start;
+            }
+        }
+    }
+    return text;
+}
+
+}  // namespace
+
 std::string sanitized_rtsp_for_log(const std::string& message) {
     const std::string header = message_header_part(message);
     std::ostringstream out;
@@ -259,7 +281,7 @@ std::string sanitized_rtsp_for_log(const std::string& message) {
         } else if (starts_with_ci(line, "Proxy-Authorization:")) {
             out << "Proxy-Authorization: <redacted>\n";
         } else {
-            out << line << "\n";
+            out << redact_uri_userinfo(line) << "\n";
         }
         start = end + 2;
     }

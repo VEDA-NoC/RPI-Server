@@ -62,7 +62,7 @@ RtspUrl parse_rtsps_url(const std::string& url) {
     const size_t host_start = scheme.size();
     const size_t path_start = url.find('/', host_start);
     if (path_start == std::string::npos) {
-        throw std::runtime_error("URL must include path, for example /ch0");
+        throw std::runtime_error("URL must include path, for example /ch1");
     }
 
     std::string host_port = url.substr(host_start, path_start - host_start);
@@ -379,12 +379,12 @@ void count_rtp_packets(SSL* ssl, std::string& buffer, int seconds, const std::st
 
 int main(int argc, char** argv) {
     if (argc < 2 || argc > 4) {
-        std::cerr << "Usage: " << argv[0] << " rtsps://host:port/ch0 [seconds] [interleaved_dump.bin]\n";
+        std::cerr << "Usage: " << argv[0] << " rtsps://host:port/ch1 [seconds] [interleaved_dump.bin]\n";
         return 1;
     }
 
     const std::string url_text = argv[1];
-    const int seconds = (argc == 3) ? std::stoi(argv[2]) : 10;
+    const int seconds = (argc >= 3) ? std::stoi(argv[2]) : 10;
     const std::string dump_path = (argc == 4) ? argv[3] : "";
 
     try {
@@ -413,8 +413,12 @@ int main(int argc, char** argv) {
         SSL_set_fd(ssl, fd);
         SSL_set_tlsext_host_name(ssl, url.host.c_str());
 
-        while (SSL_connect(ssl) != 1) {
-            const int err = SSL_get_error(ssl, -1);
+        while (true) {
+            const int connect_result = SSL_connect(ssl);
+            if (connect_result == 1) {
+                break;
+            }
+            const int err = SSL_get_error(ssl, connect_result);
             if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
                 ERR_print_errors_fp(stderr);
                 throw std::runtime_error("SSL_connect failed");
