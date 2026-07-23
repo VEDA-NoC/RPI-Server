@@ -149,6 +149,27 @@ void on_live_queue_overrun(GstElement*, gpointer user_data) {
     }
 }
 
+gchar* on_format_segment_location(GstElement*, guint, GstSample*, gpointer user_data) {
+    auto& context = *static_cast<CallbackContext*>(user_data);
+    try {
+        const auto now = std::chrono::system_clock::now().time_since_epoch();
+        const auto utc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+        std::uint32_t collision_index = 0;
+        std::string location = build_segment_path(context.config, utc_ms, collision_index);
+        while (std::filesystem::exists(location)) {
+            ++collision_index;
+            location = build_segment_path(context.config, utc_ms, collision_index);
+        }
+        return g_strdup(location.c_str());
+    } catch (const std::exception& ex) {
+        context.logger.error(std::string("[record] state=location_error message=") + ex.what());
+        return nullptr;
+    } catch (...) {
+        context.logger.error("[record] state=location_error message=unknown");
+        return nullptr;
+    }
+}
+
 void configure_source(GstElement* pipeline, const ChannelIngestConfig& config) {
     GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "camera_source");
     if (!source) {
@@ -161,10 +182,12 @@ void configure_source(GstElement* pipeline, const ChannelIngestConfig& config) {
 
 void connect_callbacks(GstElement* pipeline, CallbackContext& context) {
     GstElement* tee = gst_bin_get_by_name(GST_BIN(pipeline), "ingest_tee");
+    GstElement* recording_sink = gst_bin_get_by_name(GST_BIN(pipeline), "recording_sink");
     GstElement* live_queue = gst_bin_get_by_name(GST_BIN(pipeline), "live_queue");
     GstElement* live_sink = gst_bin_get_by_name(GST_BIN(pipeline), "live_test_sink");
-    if (!tee || !live_queue || !live_sink) {
+    if (!tee || !recording_sink || !live_queue || !live_sink) {
         if (tee) gst_object_unref(tee);
+        if (recording_sink) gst_object_unref(recording_sink);
         if (live_queue) gst_object_unref(live_queue);
         if (live_sink) gst_object_unref(live_sink);
         throw std::runtime_error("pipeline is missing a ChannelIngest branch element");
@@ -173,16 +196,19 @@ void connect_callbacks(GstElement* pipeline, CallbackContext& context) {
     GstPad* tee_sink = gst_element_get_static_pad(tee, "sink");
     if (!tee_sink) {
         gst_object_unref(tee);
+        gst_object_unref(recording_sink);
         gst_object_unref(live_queue);
         gst_object_unref(live_sink);
         throw std::runtime_error("ingest_tee is missing its sink pad");
     }
     gst_pad_add_probe(tee_sink, GST_PAD_PROBE_TYPE_BUFFER, on_ingest_buffer, &context, nullptr);
+    g_signal_connect(recording_sink, "format-location-full", G_CALLBACK(on_format_segment_location), &context);
     g_signal_connect(live_queue, "overrun", G_CALLBACK(on_live_queue_overrun), &context);
     g_signal_connect(live_sink, "handoff", G_CALLBACK(on_live_handoff), &context);
 
     gst_object_unref(tee_sink);
     gst_object_unref(tee);
+    gst_object_unref(recording_sink);
     gst_object_unref(live_queue);
     gst_object_unref(live_sink);
 }
@@ -226,6 +252,23 @@ std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig&
     return pipeline.str();
 }
 
+std::string build_segment_path(const ChannelIngestConfig& config, std::int64_t segment_start_utc_ms,
+                               std::uint32_t collision_index) {
+    const std::time_t segment_start_utc = static_cast<std::time_t>(segment_start_utc_ms / 1000);
+    const std::int64_t milliseconds = segment_start_utc_ms % 1000;
+    std::tm utc{};
+    gmtime_r(&segment_start_utc, &utc);
+
+    std::ostringstream filename;
+    filename << "ch" << config.channel_id << '_' << std::put_time(&utc, "%Y%m%dT%H%M%S") << '.' << std::setfill('0')
+             << std::setw(3) << milliseconds << 'Z';
+    if (collision_index > 0) {
+        filename << '_' << std::setfill('0') << std::setw(3) << collision_index;
+    }
+    filename << ".mp4";
+    return (std::filesystem::path(config.output_dir) / filename.str()).string();
+}
+
 ChannelIngest::ChannelIngest(ChannelIngestConfig config, RecordingIndex& index, Logger& logger,
                              std::atomic<bool>& running, LiveFrameSink* live_sink)
     : config_(std::move(config)), index_(index), logger_(logger), running_(running), live_sink_(live_sink) {
@@ -237,6 +280,9 @@ ChannelIngest::ChannelIngest(ChannelIngestConfig config, RecordingIndex& index, 
     }
     if (config_.live_queue_max_buffers == 0) {
         throw std::runtime_error("live_queue_max_buffers must be at least 1");
+    }
+    if (config_.startup_timeout_ms <= 0) {
+        throw std::runtime_error("startup_timeout_ms must be positive");
     }
 }
 
@@ -310,6 +356,8 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
 
     AttemptResult result = AttemptResult::Stopped;
     bool received_eos = false;
+    const auto startup_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(config_.startup_timeout_ms);
     const GstStateChangeReturn state_result = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (state_result == GST_STATE_CHANGE_FAILURE) {
         pipeline_errors_.fetch_add(1);
@@ -320,6 +368,13 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
 
     try {
         while (result == AttemptResult::Stopped && running_.load()) {
+            if (!first_buffer_seen_.load() && std::chrono::steady_clock::now() >= startup_deadline) {
+                pipeline_errors_.fetch_add(1);
+                logger_.error("[ingest] state=pipeline_error channel_id=" + std::to_string(config_.channel_id) +
+                              " message=first_buffer_timeout timeout_ms=" + std::to_string(config_.startup_timeout_ms));
+                result = AttemptResult::PipelineError;
+                break;
+            }
             GstMessage* message = gst_bus_timed_pop_filtered(
                 bus, 500 * GST_MSECOND,
                 static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_ELEMENT));

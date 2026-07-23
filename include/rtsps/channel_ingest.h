@@ -43,6 +43,7 @@ struct ChannelIngestConfig {
     int latency_ms = 200;
     std::int64_t segment_seconds = 60;
     int reconnect_delay_ms = 2000;
+    int startup_timeout_ms = 15000;
     unsigned int live_queue_max_buffers = 1;
 };
 
@@ -64,6 +65,8 @@ std::string to_codec_name(VideoCodec codec);
 // as rtspsrc properties after parsing and are never embedded in this string.
 std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig& config,
                                                       const std::string& location_pattern);
+std::string build_segment_path(const ChannelIngestConfig& config, std::int64_t segment_start_utc_ms,
+                               std::uint32_t collision_index = 0);
 
 class ChannelIngest {
 public:

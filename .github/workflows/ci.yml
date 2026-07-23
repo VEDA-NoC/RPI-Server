@@ -68,6 +68,7 @@ jobs:
             cmake \
             g++ \
             libgstreamer1.0-dev \
+            libssl-dev \
             libsqlite3-dev \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \

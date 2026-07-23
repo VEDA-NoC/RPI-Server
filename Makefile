@@ -4,7 +4,7 @@ GST_CFLAGS = $(shell pkg-config --cflags gstreamer-1.0)
 GST_LIBS = $(shell pkg-config --libs gstreamer-1.0)
 SQLITE_CFLAGS = $(shell pkg-config --cflags sqlite3)
 SQLITE_LIBS = $(shell pkg-config --libs sqlite3)
-LIBS = $(GST_LIBS) $(SQLITE_LIBS) -lpthread
+LIBS = $(GST_LIBS) $(SQLITE_LIBS) -lssl -lcrypto -lpthread
 
 TARGET = app
 APP_SRCS = \
@@ -12,6 +12,8 @@ APP_SRCS = \
 	src/logging/logger.cpp \
 	src/db/recording_index.cpp \
 	src/media/channel_ingest.cpp \
+	src/live/live_rtsp_server.cpp \
+	src/rtsp/rtsp_message_parser.cpp \
 	src/storage/storage_manager.cpp \
 	src/main.cpp
 

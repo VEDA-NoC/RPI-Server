@@ -1,6 +1,11 @@
 #include "rtsps/channel_ingest.h"
 
+#include <arpa/inet.h>
 #include <gst/gst.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -9,6 +14,9 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
+
+#include "rtsps/storage_manager.h"
 
 namespace {
 
@@ -54,6 +62,39 @@ void test_product_topology() {
     require(h265_pipeline.find("rtph265depay ! h265parse config-interval=-1 ! video/x-h265,alignment=au ! tee") !=
                 std::string::npos,
             "H.265 topology does not tee parsed access units");
+}
+
+void test_segment_filename_uses_each_fragment_start_utc() {
+    rtsps::ChannelIngestConfig config;
+    config.output_dir = "/tmp/recordings/ch1";
+    config.channel_id = 1;
+
+    const std::string first = rtsps::build_segment_path(config, 0);
+    const std::string second = rtsps::build_segment_path(config, 60001);
+    const std::string collision = rtsps::build_segment_path(config, 60001, 1);
+
+    require(first.find("ch1_19700101T000000.000Z.mp4") != std::string::npos,
+            "first fragment filename does not contain its UTC start");
+    require(second.find("ch1_19700101T000100.001Z.mp4") != std::string::npos,
+            "second fragment filename reused the ingest start UTC");
+    require(collision.find("ch1_19700101T000100.001Z_001.mp4") != std::string::npos,
+            "same-UTC filename collision does not receive a suffix");
+}
+
+void test_storage_check_does_not_create_camera_channel_zero_directory() {
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / ("rpi-vms-storage-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+
+    rtsps::Logger logger(rtsps::LogLevel::Error);
+    rtsps::StorageManager storage(root.string(), 0, false, logger);
+    const rtsps::StorageStatus status = storage.check();
+
+    require(status.state == rtsps::StorageState::Ready, "temporary storage did not become ready");
+    require(std::filesystem::is_directory(root / "recordings"), "recordings root was not created");
+    require(!std::filesystem::exists(root / "recordings" / "ch0"), "storage check recreated forbidden ch0");
+    std::filesystem::remove_all(root);
 }
 
 void test_slow_live_branch_does_not_block_recording() {
@@ -131,13 +172,88 @@ void test_pipeline_error_reconnects_without_shutdown_drain() {
     require(stats.connection_attempts >= 2, "pipeline error did not start another connection attempt");
 }
 
+void test_stalled_rtsp_startup_times_out_and_reconnects() {
+    const int listener = ::socket(AF_INET, SOCK_STREAM, 0);
+    require(listener >= 0, "failed to create stalled RTSP listener");
+
+    int reuse = 1;
+    ::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    require(::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0,
+            "failed to bind stalled RTSP listener");
+    require(::listen(listener, 8) == 0, "failed to listen for stalled RTSP clients");
+    socklen_t address_size = sizeof(address);
+    require(::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &address_size) == 0,
+            "failed to read stalled RTSP listener port");
+
+    std::atomic<bool> server_running{true};
+    std::thread server([&]() {
+        std::vector<int> clients;
+        while (server_running.load()) {
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(listener, &read_fds);
+            timeval timeout{0, 50000};
+            if (::select(listener + 1, &read_fds, nullptr, nullptr, &timeout) > 0) {
+                const int client = ::accept(listener, nullptr, nullptr);
+                if (client >= 0) clients.push_back(client);
+            }
+        }
+        for (const int client : clients) ::close(client);
+    });
+
+    const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    const std::filesystem::path root =
+        std::filesystem::temp_directory_path() / ("rpi-vms-stalled-ingest-test-" + std::to_string(unique));
+    std::filesystem::create_directories(root);
+
+    rtsps::ChannelIngestStats stats;
+    {
+        rtsps::Logger logger(rtsps::LogLevel::Error);
+        rtsps::RecordingIndex index((root / "media.db").string(), logger);
+        index.open();
+        index.initialize_schema();
+
+        rtsps::ChannelIngestConfig config;
+        config.rtsp_location = "rtsp://127.0.0.1:" + std::to_string(ntohs(address.sin_port)) + "/stalled";
+        config.camera_user = "unit-user";
+        config.camera_password = "unit-password";
+        config.output_dir = (root / "recordings").string();
+        config.startup_timeout_ms = 200;
+        config.reconnect_delay_ms = 10;
+
+        std::atomic<bool> running{true};
+        rtsps::ChannelIngest ingest(config, index, logger, running);
+        std::thread worker([&ingest]() { ingest.run(); });
+        std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+        running.store(false);
+        worker.join();
+        stats = ingest.stats();
+    }
+
+    server_running.store(false);
+    server.join();
+    ::close(listener);
+    std::filesystem::remove_all(root);
+
+    require(stats.pipeline_errors >= 1, "stalled RTSP startup did not time out");
+    require(stats.reconnects >= 1, "stalled RTSP startup did not enter reconnect state");
+    require(stats.connection_attempts >= 2, "stalled RTSP startup did not retry the same ingest");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     gst_init(&argc, &argv);
     test_product_topology();
+    test_segment_filename_uses_each_fragment_start_utc();
+    test_storage_check_does_not_create_camera_channel_zero_directory();
     test_slow_live_branch_does_not_block_recording();
     test_pipeline_error_reconnects_without_shutdown_drain();
+    test_stalled_rtsp_startup_times_out_and_reconnects();
     std::cout << "channel_ingest_test: PASS\n";
     return 0;
 }

@@ -88,6 +88,7 @@ rsync_args=(
     --exclude="/.git/"
     --exclude="/.github/"
     --exclude="/build/"
+    --exclude="/build-*/"
     --exclude="/cmake-build-*/"
     --exclude="/docs/current-environment-local-ko.md"
     --exclude="/recordings/"

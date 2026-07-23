@@ -92,7 +92,7 @@ StorageStatus StorageManager::check() {
         logger_.warn("[storage] " + warning + ": " + storage_root_);
     }
 
-    std::filesystem::create_directories(std::filesystem::path(storage_root_) / "recordings" / "ch0", ec);
+    std::filesystem::create_directories(std::filesystem::path(storage_root_) / "recordings", ec);
     if (ec) {
         status.state = StorageState::ReadOnly;
         status.message = "failed to create recordings directory: " + ec.message();

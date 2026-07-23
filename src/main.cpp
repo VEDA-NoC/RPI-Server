@@ -10,6 +10,7 @@
 
 #include "rtsps/app_config.h"
 #include "rtsps/channel_ingest.h"
+#include "rtsps/live_rtsp_server.h"
 #include "rtsps/logger.h"
 #include "rtsps/recording_index.h"
 #include "rtsps/storage_manager.h"
@@ -25,6 +26,7 @@ struct VmsConfig {
     int camera_port = 554;
     std::string camera_user = "admin";
     std::string camera_password;
+    bool camera_password_stdin = false;
     std::string camera_path_template = "/{camera_channel}/profile2/media.smp";
     int camera_channel = 0;
     std::string storage_root = "/mnt/vms-storage";
@@ -34,6 +36,15 @@ struct VmsConfig {
     int latency_ms = 200;
     int segment_seconds = 60;
     int reconnect_delay_ms = 2000;
+    int ingest_startup_timeout_ms = 15000;
+    std::string live_listen_host = "0.0.0.0";
+    int rtsp_port = 8554;
+    int rtsps_port = 0;
+    std::string tls_cert_file;
+    std::string tls_key_file;
+    std::size_t live_client_queue_frames = 30;
+    std::size_t live_client_queue_bytes = 8 * 1024 * 1024;
+    std::size_t rtp_mtu = 1200;
     std::uintmax_t min_free_bytes = 1024ULL * 1024ULL * 1024ULL;
     bool require_storage_mount = false;
     rtsps::LogLevel log_level = rtsps::LogLevel::Info;
@@ -70,11 +81,12 @@ std::uintmax_t parse_size(const std::string& name, const std::string& value) {
 }
 
 void print_usage(const char* program) {
-    std::cout << "Usage: " << program << " --camera-host HOST --camera-password PASSWORD [options]\n"
+    std::cout << "Usage: " << program << " --camera-host HOST --camera-password-stdin [options]\n"
               << "  --camera-host CAMERA_IP\n"
               << "  --camera-port 554\n"
               << "  --camera-user admin\n"
-              << "  --camera-password password\n"
+              << "  --camera-password PASSWORD (legacy; visible in process arguments)\n"
+              << "  --camera-password-stdin\n"
               << "  --camera-path-template '/{camera_channel}/profile2/media.smp'\n"
               << "  --camera-channel 0\n"
               << "  --storage-root /mnt/vms-storage\n"
@@ -84,6 +96,15 @@ void print_usage(const char* program) {
               << "  --latency-ms 200\n"
               << "  --segment-seconds 60\n"
               << "  --reconnect-delay-ms 2000\n"
+              << "  --ingest-startup-timeout-ms 15000\n"
+              << "  --live-listen-host 0.0.0.0\n"
+              << "  --rtsp-port 8554 (0 disables plain RTSP)\n"
+              << "  --rtsps-port 0 (0 disables RTSPS)\n"
+              << "  --tls-cert certs/server.crt\n"
+              << "  --tls-key certs/server.key\n"
+              << "  --live-client-queue-frames 30\n"
+              << "  --live-client-queue-bytes 8388608\n"
+              << "  --rtp-mtu 1200\n"
               << "  --min-free-bytes 1073741824\n"
               << "  --require-storage-mount\n"
               << "  --log-level error|warn|info|debug|trace\n";
@@ -108,6 +129,8 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.camera_user = need_value(arg);
         else if (arg == "--camera-password")
             config.camera_password = need_value(arg);
+        else if (arg == "--camera-password-stdin")
+            config.camera_password_stdin = true;
         else if (arg == "--camera-path-template")
             config.camera_path_template = need_value(arg);
         else if (arg == "--camera-channel")
@@ -128,6 +151,24 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.segment_seconds = parse_int(arg, need_value(arg), 1, 3600);
         else if (arg == "--reconnect-delay-ms")
             config.reconnect_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
+        else if (arg == "--ingest-startup-timeout-ms")
+            config.ingest_startup_timeout_ms = parse_int(arg, need_value(arg), 1000, 300000);
+        else if (arg == "--live-listen-host")
+            config.live_listen_host = need_value(arg);
+        else if (arg == "--rtsp-port")
+            config.rtsp_port = parse_int(arg, need_value(arg), 0, 65535);
+        else if (arg == "--rtsps-port")
+            config.rtsps_port = parse_int(arg, need_value(arg), 0, 65535);
+        else if (arg == "--tls-cert")
+            config.tls_cert_file = need_value(arg);
+        else if (arg == "--tls-key")
+            config.tls_key_file = need_value(arg);
+        else if (arg == "--live-client-queue-frames")
+            config.live_client_queue_frames = parse_size(arg, need_value(arg));
+        else if (arg == "--live-client-queue-bytes")
+            config.live_client_queue_bytes = parse_size(arg, need_value(arg));
+        else if (arg == "--rtp-mtu")
+            config.rtp_mtu = parse_size(arg, need_value(arg));
         else if (arg == "--min-free-bytes")
             config.min_free_bytes = parse_size(arg, need_value(arg));
         else if (arg == "--require-storage-mount")
@@ -152,8 +193,31 @@ VmsConfig parse_vms_args(int argc, char** argv) {
     if (config.camera_user.empty()) {
         throw std::runtime_error("--camera-user is required");
     }
+    if (config.camera_password_stdin && !config.camera_password.empty()) {
+        throw std::runtime_error("--camera-password and --camera-password-stdin are mutually exclusive");
+    }
+    if (config.camera_password_stdin) {
+        if (!std::getline(std::cin, config.camera_password)) {
+            throw std::runtime_error("failed to read camera password from stdin");
+        }
+        if (!config.camera_password.empty() && config.camera_password.back() == '\r') {
+            config.camera_password.pop_back();
+        }
+    }
     if (config.camera_password.empty()) {
-        throw std::runtime_error("--camera-password is required");
+        throw std::runtime_error("--camera-password or --camera-password-stdin is required");
+    }
+    if (config.rtsp_port == 0 && config.rtsps_port == 0) {
+        throw std::runtime_error("at least one of --rtsp-port or --rtsps-port must be enabled");
+    }
+    if (config.rtsps_port > 0 && (config.tls_cert_file.empty() || config.tls_key_file.empty())) {
+        throw std::runtime_error("--rtsps-port requires --tls-cert and --tls-key");
+    }
+    if (config.live_client_queue_frames == 0 || config.live_client_queue_frames > 10000) {
+        throw std::runtime_error("--live-client-queue-frames out of range");
+    }
+    if (config.live_client_queue_bytes == 0 || config.rtp_mtu < 256 || config.rtp_mtu > 65535) {
+        throw std::runtime_error("live queue byte limit or RTP MTU out of range");
     }
     if (config.media_db.empty()) {
         config.media_db = (std::filesystem::path(config.storage_root) / "index" / "media.db").string();
@@ -221,10 +285,33 @@ int main(int argc, char** argv) {
         ingest_config.latency_ms = config.latency_ms;
         ingest_config.segment_seconds = config.segment_seconds;
         ingest_config.reconnect_delay_ms = config.reconnect_delay_ms;
+        ingest_config.startup_timeout_ms = config.ingest_startup_timeout_ms;
 
-        // Process-owned ingest lifetime is independent of future live client sessions.
-        rtsps::ChannelIngest ingest(ingest_config, index, logger, g_running);
-        return ingest.run();
+        rtsps::LiveRtspServerConfig live_config;
+        live_config.listen_host = config.live_listen_host;
+        live_config.rtsp_port = config.rtsp_port;
+        live_config.rtsps_port = config.rtsps_port;
+        live_config.tls_cert_file = config.tls_cert_file;
+        live_config.tls_key_file = config.tls_key_file;
+        live_config.client_queue_frames = config.live_client_queue_frames;
+        live_config.client_queue_bytes = config.live_client_queue_bytes;
+        live_config.rtp_mtu = config.rtp_mtu;
+        live_config.channel_id = config.channel_id;
+        live_config.codec = config.codec;
+
+        rtsps::LiveRtspServer live_server(live_config, logger, g_running);
+        live_server.start();
+
+        // The process-owned ingest starts independently and fans compressed AUs into bounded client queues.
+        rtsps::ChannelIngest ingest(ingest_config, index, logger, g_running, &live_server);
+        const int result = ingest.run();
+        live_server.stop();
+        const rtsps::LiveRtspServerStats live_stats = live_server.stats();
+        logger.info("[live-server] sessions_created=" + std::to_string(live_stats.sessions_created) +
+                    " sessions_closed=" + std::to_string(live_stats.sessions_closed) +
+                    " first_rtp=" + std::to_string(live_stats.first_rtp_transmissions) +
+                    " queue_drops=" + std::to_string(live_stats.queue_drops));
+        return result;
     } catch (const std::exception& ex) {
         std::cerr << "error: " << ex.what() << "\n";
         return 1;
