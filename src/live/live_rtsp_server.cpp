@@ -249,6 +249,7 @@ struct ClientMediaState {
     BoundedFrameQueue queue;
     std::atomic<bool> playing{false};
     std::atomic<bool> connected{true};
+    std::atomic<int> channel_id{-1};
     std::uint16_t sequence;
     std::uint32_t ssrc;
     std::uint32_t timestamp_origin;
@@ -536,11 +537,34 @@ RtspControlResult process_rtsp_request(const std::string& request, int registere
     return {make_response(405, cseq, {"Allow: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN, GET_PARAMETER"}), false, false};
 }
 
+bool find_live_channel(const LiveRtspServerConfig& config, int channel_id, VideoCodec& codec) {
+    if (config.channels.empty()) {
+        if (config.channel_id != channel_id) return false;
+        codec = config.codec;
+        return true;
+    }
+    const auto found = std::find_if(config.channels.begin(), config.channels.end(),
+                                    [channel_id](const auto& channel) { return channel.channel_id == channel_id; });
+    if (found == config.channels.end()) return false;
+    codec = found->codec;
+    return true;
+}
+
 class LiveRtspServer::Impl {
 public:
     Impl(LiveRtspServerConfig config, Logger& logger, std::atomic<bool>& running)
         : config_(std::move(config)), logger_(logger), running_(running) {
-        if (config_.channel_id < 1 || config_.channel_id > 4) throw std::runtime_error("live channel_id out of range");
+        if (config_.channels.empty()) {
+            config_.channels.push_back({config_.channel_id, config_.codec});
+        }
+        std::array<bool, 5> channel_seen{};
+        for (const auto& channel : config_.channels) {
+            if (channel.channel_id < 1 || channel.channel_id > 4)
+                throw std::runtime_error("live channel_id out of range");
+            if (channel_seen[static_cast<std::size_t>(channel.channel_id)])
+                throw std::runtime_error("duplicate live channel registration");
+            channel_seen[static_cast<std::size_t>(channel.channel_id)] = true;
+        }
         if (config_.rtsp_port <= 0 && config_.rtsps_port <= 0)
             throw std::runtime_error("at least one live RTSP listener must be enabled");
         if (config_.rtsps_port > 0 && (config_.tls_cert_file.empty() || config_.tls_key_file.empty()))
@@ -587,7 +611,8 @@ public:
     }
 
     void on_frame(const LiveEncodedFrameView& view) {
-        if (!view.data || view.size == 0 || view.channel_id != config_.channel_id) return;
+        const auto* channel = registered_channel(view.channel_id);
+        if (!view.data || view.size == 0 || !channel || channel->codec != view.codec) return;
         auto frame = std::make_shared<OwnedLiveFrame>();
         frame->data.assign(view.data, view.data + view.size);
         frame->pts_ns = view.pts_ns;
@@ -604,7 +629,8 @@ public:
                 std::remove_if(clients_.begin(), clients_.end(), [](const auto& weak) { return weak.expired(); }),
                 clients_.end());
             for (const auto& weak : clients_) {
-                if (auto client = weak.lock(); client && client->connected.load() && client->playing.load())
+                if (auto client = weak.lock(); client && client->connected.load() && client->playing.load() &&
+                                               client->channel_id.load() == view.channel_id)
                     clients.push_back(std::move(client));
             }
         }
@@ -655,9 +681,9 @@ private:
             throw std::runtime_error("failed to listen on " + config_.listen_host + ":" + std::to_string(port) + ": " +
                                      message);
         }
-        logger_.info("[live-server] state=listening transport=" +
-                     std::string(port == config_.rtsps_port ? "rtsps" : "rtsp") + " address=" + config_.listen_host +
-                     ":" + std::to_string(port) + " path=/ch" + std::to_string(config_.channel_id));
+        logger_.info(
+            "[live-server] state=listening transport=" + std::string(port == config_.rtsps_port ? "rtsps" : "rtsp") +
+            " address=" + config_.listen_host + ":" + std::to_string(port) + " channels=" + registered_channel_list());
         return fd;
     }
 
@@ -693,37 +719,63 @@ private:
         }
     }
 
-    std::string codec_fmtp() const {
+    const LiveRtspServerConfig::Channel* registered_channel(int channel_id) const {
+        const auto found = std::find_if(config_.channels.begin(), config_.channels.end(),
+                                        [channel_id](const auto& channel) { return channel.channel_id == channel_id; });
+        return found == config_.channels.end() ? nullptr : &*found;
+    }
+
+    std::string registered_channel_list() const {
+        std::string result;
+        for (const auto& channel : config_.channels) {
+            if (!result.empty()) result += ',';
+            result += "/ch" + std::to_string(channel.channel_id);
+        }
+        return result;
+    }
+
+    struct ParameterSets {
+        std::vector<std::uint8_t> h264_sps;
+        std::vector<std::uint8_t> h264_pps;
+        std::vector<std::uint8_t> h265_vps;
+        std::vector<std::uint8_t> h265_sps;
+        std::vector<std::uint8_t> h265_pps;
+    };
+
+    std::string codec_fmtp(int channel_id, VideoCodec codec) const {
         std::lock_guard<std::mutex> lock(parameter_mutex_);
-        if (config_.codec == VideoCodec::H264 && h264_sps_.size() && h264_pps_.size())
-            return "packetization-mode=1;sprop-parameter-sets=" + base64_encode(h264_sps_) + "," +
-                   base64_encode(h264_pps_);
-        if (config_.codec == VideoCodec::H265 && h265_vps_.size() && h265_sps_.size() && h265_pps_.size())
-            return "sprop-vps=" + base64_encode(h265_vps_) + ";sprop-sps=" + base64_encode(h265_sps_) +
-                   ";sprop-pps=" + base64_encode(h265_pps_);
+        const auto& sets = parameter_sets_by_channel_[static_cast<std::size_t>(channel_id)];
+        if (codec == VideoCodec::H264 && sets.h264_sps.size() && sets.h264_pps.size())
+            return "packetization-mode=1;sprop-parameter-sets=" + base64_encode(sets.h264_sps) + "," +
+                   base64_encode(sets.h264_pps);
+        if (codec == VideoCodec::H265 && sets.h265_vps.size() && sets.h265_sps.size() && sets.h265_pps.size())
+            return "sprop-vps=" + base64_encode(sets.h265_vps) + ";sprop-sps=" + base64_encode(sets.h265_sps) +
+                   ";sprop-pps=" + base64_encode(sets.h265_pps);
         return {};
     }
 
-    std::vector<std::vector<std::uint8_t>> parameter_sets() const {
+    std::vector<std::vector<std::uint8_t>> parameter_sets(int channel_id, VideoCodec codec) const {
         std::lock_guard<std::mutex> lock(parameter_mutex_);
-        if (config_.codec == VideoCodec::H264) return {h264_sps_, h264_pps_};
-        return {h265_vps_, h265_sps_, h265_pps_};
+        const auto& sets = parameter_sets_by_channel_[static_cast<std::size_t>(channel_id)];
+        if (codec == VideoCodec::H264) return {sets.h264_sps, sets.h264_pps};
+        return {sets.h265_vps, sets.h265_sps, sets.h265_pps};
     }
 
     void update_parameter_sets(const OwnedLiveFrame& frame) {
         const auto nal_units = split_access_unit(frame.data);
         std::lock_guard<std::mutex> lock(parameter_mutex_);
+        auto& sets = parameter_sets_by_channel_[static_cast<std::size_t>(frame.channel_id)];
         for (const auto& nal : nal_units) {
             if (nal.empty()) continue;
             if (frame.codec == VideoCodec::H264) {
                 const int type = nal[0] & 0x1f;
-                if (type == 7) h264_sps_ = nal;
-                if (type == 8) h264_pps_ = nal;
+                if (type == 7) sets.h264_sps = nal;
+                if (type == 8) sets.h264_pps = nal;
             } else if (nal.size() >= 2) {
                 const int type = (nal[0] >> 1) & 0x3f;
-                if (type == 32) h265_vps_ = nal;
-                if (type == 33) h265_sps_ = nal;
-                if (type == 34) h265_pps_ = nal;
+                if (type == 32) sets.h265_vps = nal;
+                if (type == 33) sets.h265_sps = nal;
+                if (type == 34) sets.h265_pps = nal;
             }
         }
     }
@@ -747,7 +799,7 @@ private:
         if (media.waiting_for_keyframe && !frame.key_frame) return true;
         std::vector<std::vector<std::uint8_t>> nal_units;
         if (media.waiting_for_keyframe) {
-            nal_units = parameter_sets();
+            nal_units = parameter_sets(frame.channel_id, frame.codec);
             nal_units.erase(
                 std::remove_if(nal_units.begin(), nal_units.end(), [](const auto& nal) { return nal.empty(); }),
                 nal_units.end());
@@ -768,7 +820,7 @@ private:
         if (!packets.empty() && !media.first_rtp_sent) {
             media.first_rtp_sent = true;
             first_rtp_transmissions_.fetch_add(1);
-            logger_.info("[live-client] state=first_rtp channel_id=" + std::to_string(config_.channel_id));
+            logger_.info("[live-client] state=first_rtp channel_id=" + std::to_string(frame.channel_id));
         }
         const auto now = std::chrono::steady_clock::now();
         if (media.last_rtcp.time_since_epoch().count() == 0 || now - media.last_rtcp >= kRtcpInterval) {
@@ -823,17 +875,20 @@ private:
                         if (!request.empty() && static_cast<unsigned char>(request[0]) == '$') continue;
                         logger_.trace(rtsp_message_summary("[in] public-client", request));
                         const int requested_channel = parse_public_channel_id(extract_request_target(request));
-                        if (requested_channel < 0 || requested_channel != config_.channel_id)
-                            logger_.warn("[live-client] state=channel_not_found");
-                        RtspControlResult result =
-                            process_rtsp_request(request, config_.channel_id, config_.codec, codec_fmtp(), control);
+                        const auto* channel = registered_channel(requested_channel);
+                        if (!channel) logger_.warn("[live-client] state=channel_not_found");
+                        const int registered_id = channel ? channel->channel_id : -1;
+                        const VideoCodec codec = channel ? channel->codec : VideoCodec::H264;
+                        RtspControlResult result = process_rtsp_request(
+                            request, registered_id, codec, channel ? codec_fmtp(registered_id, codec) : "", control);
                         if (!connection.write(result.response)) {
                             connected = false;
                             break;
                         }
                         if (result.start_play) {
+                            media->channel_id.store(control.channel_id);
                             media->playing.store(true);
-                            logger_.info("[live-client] state=play channel_id=" + std::to_string(config_.channel_id));
+                            logger_.info("[live-client] state=play channel_id=" + std::to_string(control.channel_id));
                         }
                         if (result.close_session) {
                             connected = false;
@@ -890,11 +945,7 @@ private:
     mutable std::mutex clients_mutex_;
     std::vector<std::weak_ptr<ClientMediaState>> clients_;
     mutable std::mutex parameter_mutex_;
-    std::vector<std::uint8_t> h264_sps_;
-    std::vector<std::uint8_t> h264_pps_;
-    std::vector<std::uint8_t> h265_vps_;
-    std::vector<std::uint8_t> h265_sps_;
-    std::vector<std::uint8_t> h265_pps_;
+    std::array<ParameterSets, 5> parameter_sets_by_channel_;
     std::atomic<std::uint64_t> sessions_created_{0};
     std::atomic<std::uint64_t> sessions_closed_{0};
     std::atomic<std::uint64_t> active_clients_{0};

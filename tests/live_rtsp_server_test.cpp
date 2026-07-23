@@ -65,6 +65,28 @@ void test_channel_routes_and_control_state() {
     require(result.response.find("H265/90000") != std::string::npos, "H.265 SDP clock is missing");
 }
 
+void test_four_channel_registration() {
+    rtsps::LiveRtspServerConfig config;
+    config.channels = {{1, rtsps::VideoCodec::H264},
+                       {2, rtsps::VideoCodec::H264},
+                       {3, rtsps::VideoCodec::H264},
+                       {4, rtsps::VideoCodec::H264}};
+    for (int channel_id = 1; channel_id <= 4; ++channel_id) {
+        rtsps::VideoCodec codec = rtsps::VideoCodec::H265;
+        require(rtsps::find_live_channel(config, channel_id, codec), "configured /ch route was not registered");
+        rtsps::RtspControlState state;
+        const auto result = rtsps::process_rtsp_request(
+            request("DESCRIBE", "/ch" + std::to_string(channel_id), channel_id), channel_id, codec, {}, state);
+        require(rtsps::rtsp_status_code(result.response) == 200, "configured /ch route did not return 200");
+    }
+    rtsps::VideoCodec codec = rtsps::VideoCodec::H264;
+    require(!rtsps::find_live_channel(config, 0, codec) && !rtsps::find_live_channel(config, 5, codec),
+            "invalid live route was registered");
+    rtsps::RtspControlState invalid;
+    const auto result = rtsps::process_rtsp_request(request("DESCRIBE", "/ch5", 5), -1, codec, {}, invalid);
+    require(rtsps::rtsp_status_code(result.response) == 404, "invalid /ch route did not return 404");
+}
+
 void test_rtp_packetization() {
     std::uint16_t sequence = 100;
     const std::uint32_t timestamp = 90000;
@@ -135,6 +157,7 @@ void test_parser_limits_and_redaction() {
 
 int main() {
     test_channel_routes_and_control_state();
+    test_four_channel_registration();
     test_rtp_packetization();
     test_bounded_independent_queues();
     test_parser_limits_and_redaction();

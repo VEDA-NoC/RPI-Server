@@ -87,6 +87,12 @@ struct LiveRtspServerConfig {
     std::size_t client_queue_bytes = 8 * 1024 * 1024;
     std::size_t rtp_mtu = 1200;
     int io_timeout_ms = 1000;
+    struct Channel {
+        int channel_id = 1;
+        VideoCodec codec = VideoCodec::H264;
+    };
+    std::vector<Channel> channels;
+    // Backward-compatible single-channel registration used by M3 callers.
     int channel_id = 1;
     VideoCodec codec = VideoCodec::H264;
 };
@@ -99,6 +105,8 @@ struct LiveRtspServerStats {
     std::uint64_t queue_drops = 0;
     std::uint64_t write_failures = 0;
 };
+
+bool find_live_channel(const LiveRtspServerConfig& config, int channel_id, VideoCodec& codec);
 
 class LiveRtspServer final : public LiveFrameSink {
 public:

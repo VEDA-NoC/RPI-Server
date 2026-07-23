@@ -19,15 +19,22 @@ void check_sqlite(int rc, sqlite3* db, const std::string& action) {
 
 }  // namespace
 
-RecordingIndex::RecordingIndex(std::string db_path, Logger& logger) : db_path_(std::move(db_path)), logger_(logger) {}
+RecordingIndex::RecordingIndex(std::string db_path, Logger& logger, int busy_timeout_ms)
+    : db_path_(std::move(db_path)), logger_(logger), busy_timeout_ms_(busy_timeout_ms) {
+    if (busy_timeout_ms_ < 0) {
+        throw std::runtime_error("SQLite busy timeout must not be negative");
+    }
+}
 
 RecordingIndex::~RecordingIndex() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (db_) {
         sqlite3_close(db_);
     }
 }
 
 void RecordingIndex::open() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (db_) {
         return;
     }
@@ -40,13 +47,16 @@ void RecordingIndex::open() {
         }
         throw std::runtime_error("sqlite open failed: " + error);
     }
+    check_sqlite(sqlite3_busy_timeout(db_, busy_timeout_ms_), db_, "configure busy timeout");
     exec("PRAGMA foreign_keys = ON;");
     exec("PRAGMA journal_mode = WAL;");
     exec("PRAGMA synchronous = NORMAL;");
-    logger_.info("[db] opened media index: " + db_path_);
+    logger_.info("[db] opened media index: " + db_path_ +
+                 " writer_policy=process_mutex busy_timeout_ms=" + std::to_string(busy_timeout_ms_));
 }
 
 void RecordingIndex::initialize_schema() {
+    std::lock_guard<std::mutex> lock(mutex_);
     exec(
         "CREATE TABLE IF NOT EXISTS schema_migrations ("
         "version INTEGER PRIMARY KEY,"
@@ -96,12 +106,38 @@ void RecordingIndex::initialize_schema() {
         "ON vms_events(channel_id, wall_time_utc);"
         "CREATE INDEX IF NOT EXISTS idx_vms_events_type_time "
         "ON vms_events(event_type, wall_time_utc);"
+        "CREATE TABLE IF NOT EXISTS vms_channels ("
+        "channel_id INTEGER PRIMARY KEY CHECK(channel_id BETWEEN 1 AND 4),"
+        "camera_channel INTEGER NOT NULL UNIQUE CHECK(camera_channel BETWEEN 0 AND 3),"
+        "updated_at_utc TEXT NOT NULL"
+        ");"
         "INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc, description) "
-        "VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'initial media schema');");
+        "VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'initial media schema');"
+        "INSERT OR IGNORE INTO schema_migrations(version, applied_at_utc, description) "
+        "VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'add camera to VMS channel mapping');");
+}
+
+void RecordingIndex::upsert_channel_mapping(int channel_id, int camera_channel) {
+    if (channel_id < 1 || channel_id > 4 || camera_channel < 0 || camera_channel > 3) {
+        throw std::runtime_error("channel mapping out of range");
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    static constexpr const char* sql =
+        "INSERT INTO vms_channels(channel_id, camera_channel, updated_at_utc) VALUES (?, ?, ?) "
+        "ON CONFLICT(channel_id) DO UPDATE SET "
+        "camera_channel=excluded.camera_channel, updated_at_utc=excluded.updated_at_utc;";
+    sqlite3_stmt* stmt = nullptr;
+    check_sqlite(sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr), db_, "prepare channel mapping");
+    sqlite3_bind_int(stmt, 1, channel_id);
+    sqlite3_bind_int(stmt, 2, camera_channel);
+    bind_text(stmt, 3, now_utc());
+    check_sqlite(sqlite3_step(stmt), db_, "upsert channel mapping");
+    sqlite3_finalize(stmt);
 }
 
 void RecordingIndex::mark_segment_opened(int channel_id, const std::string& location, const std::string& container,
                                          const std::string& codec) {
+    std::lock_guard<std::mutex> lock(mutex_);
     static constexpr const char* sql =
         "INSERT INTO recording_segments("
         "channel_id, file_path, container, codec, start_wall_time_utc, complete, created_at_utc"
@@ -122,6 +158,7 @@ void RecordingIndex::mark_segment_opened(int channel_id, const std::string& loca
 }
 
 void RecordingIndex::mark_segment_closed(const std::string& location) {
+    std::lock_guard<std::mutex> lock(mutex_);
     static constexpr const char* sql =
         "UPDATE recording_segments "
         "SET end_wall_time_utc = ?, size_bytes = ?, complete = 1 "
@@ -136,6 +173,8 @@ void RecordingIndex::mark_segment_closed(const std::string& location) {
     sqlite3_finalize(stmt);
     logger_.info("[record] closed segment: " + location);
 }
+
+int RecordingIndex::busy_timeout_ms() const { return busy_timeout_ms_; }
 
 void RecordingIndex::exec(const std::string& sql) {
     char* error = nullptr;

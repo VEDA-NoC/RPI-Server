@@ -2,17 +2,23 @@
 
 Hanwha Vision Network camera의 원본 H.264/H.265 stream을 Raspberry Pi에서 녹화하고, 이후 live fan-out·event recording·playback으로 확장하는 VMS 프로젝트입니다.
 
-현재 구현은 프로세스가 소유하는 단일 채널 `ChannelIngest`와 이를 공유하는 RTSP/RTSPS
-live server입니다. 카메라 RTSP ingest는 live client session과 독립적으로 유지되며
-오류/EOS 뒤 재연결합니다.
+현재 구현은 하나의 프로세스가 최대 4개의 `ChannelIngest`를 소유하는 `ChannelManager`와
+이를 공유하는 RTSP/RTSPS live server입니다. 각 카메라 RTSP ingest는 다른 채널과 live
+client session에서 독립적으로 실행되며 오류/EOS 뒤 해당 채널만 재연결합니다.
 
 ```text
-camera channel 0
+ChannelManager (one rpi_vms process)
+  camera 0 -> VMS 1 -> recordings/ch1 + /ch1
+  camera 1 -> VMS 2 -> recordings/ch2 + /ch2
+  camera 2 -> VMS 3 -> recordings/ch3 + /ch3
+  camera 3 -> VMS 4 -> recordings/ch4 + /ch4
+
+각 ingest
   -> RTSP over TCP / Digest
   -> RTP depayload / codec parse
   -> tee
-     -> non-leaky recording queue -> MP4 segment -> SQLite index
-     -> leaky/latest live queue -> RTSP/RTSPS client별 bounded queue
+     -> non-leaky recording queue -> MP4 segment -> shared SQLite index
+     -> leaky/latest live queue -> client별 bounded queue
 ```
 
 ## 채널과 경로 기준
@@ -22,13 +28,22 @@ camera_channel=0..3  camera RTSP/SUNAPI namespace
 channel_id=1..4      VMS/DB/client/storage namespace
 ```
 
-기본 mapping은 camera channel `0`을 VMS channel `1`로 저장합니다.
+기본 mapping은 `0:1,1:2,2:3,3:4`이며 `--channel-map CAMERA:VMS,...`로 명시합니다.
+1채널 부하 기준선은 `--channel-map 0:1`로 실행합니다.
 
 ```text
 /mnt/vms-storage/
   index/media.db
   recordings/ch1/ch1_*.mp4
+  recordings/ch2/ch2_*.mp4
+  recordings/ch3/ch3_*.mp4
+  recordings/ch4/ch4_*.mp4
 ```
+
+SQLite writer는 프로세스 내부 mutex로 직렬화하고 WAL/NORMAL 모드와 기본
+`busy_timeout=5000ms`를 사용합니다. 다른 프로세스가 writer lock을 잡으면 timeout
+범위에서 대기합니다. camera↔VMS mapping은 migration version 2의 `vms_channels`에
+기록합니다.
 
 ## Raspberry Pi package
 
@@ -85,9 +100,9 @@ printf '%s\n' "$CAMERA_PASSWORD" | ./build/rpi_vms \
   --camera-user USER \
   --camera-password-stdin \
   --camera-path-template '/{camera_channel}/profile2/media.smp' \
-  --camera-channel 0 \
+  --channel-map '0:1,1:2,2:3,3:4' \
   --storage-root /mnt/vms-storage \
-  --channel-id 1 \
+  --db-busy-timeout-ms 5000 \
   --codec h264 \
   --segment-seconds 60 \
   --reconnect-delay-ms 2000 \
@@ -100,7 +115,7 @@ unset CAMERA_PASSWORD
 
 현재 코드는 userinfo가 없는 camera URI를 내부에서 만들고 credential은 `rtspsrc`
 속성으로 전달하여 Digest 인증을 처리합니다. recording/live 경로는 transcoding하지
-않습니다. VMS channel 1의 기본 live URL은 `rtsp://PI_IP:8554/ch1`입니다. event gate와
+않습니다. 기본 live URL은 `rtsp://PI_IP:8554/ch1`부터 `/ch4`까지입니다. event gate와
 playback은 아직 구현하지 않았습니다.
 
 ## M3 통합 테스트
@@ -131,9 +146,52 @@ RTSPS 시험은 Git에서 제외된 `certs/server.crt`와 `certs/server.key`가 
 `M3_TLS_KEY`로 경로만 지정합니다.
 
 Windows Qt viewer의 기본 재생 호환성을 확인할 때는 Pi에서 다음 스크립트를 실행한
-상태로 유지합니다. 출력된 `Qt Base URL`을 viewer 설정에 적용하면 현재 M3 범위에서는
-CH1만 재생되고 아직 등록되지 않은 CH2~CH4는 404를 반환합니다.
+상태로 유지합니다. 출력된 `Qt Base URL`을 viewer 설정에 적용하면 M4 기본 mapping에서
+CH1~CH4를 재생할 수 있습니다.
 
 ```bash
 bash tools/run-m3-qt-smoke.sh
+```
+
+## M4 4채널 통합 및 부하 시험
+
+먼저 camera channel `0..3`이 모두 같은 profile 경로를 제공하는지 M4 통합 시험의
+`state=streaming` 로그로 확인합니다. 시험은 기존 DB와 영상 파일을 삭제하지 않고 새
+segment를 추가합니다.
+
+```bash
+M4_APP=./build-m4/rpi_vms bash tools/test-m4-integration.sh
+```
+
+정상 종료 시 다음 핵심 판정이 출력됩니다.
+
+```text
+PASS: camera channels 0..3 are streaming as VMS channels 1..4
+PASS: /ch1..ch4 transmitted RTP
+PASS: invalid /ch5 route returned 404
+PASS: ch0 was not created
+PASS: M4 four-channel integration test
+```
+
+1채널과 4채널의 CPU, RSS, ext4 mount block write, camera NIC RX/TX, ICMP packet loss는
+동일한 측정 시간으로 순차 수집합니다. 기본 측정 시간은 각 120초이며 결과는
+`/tmp/rpi-vms-m4-load/summary.csv`와 raw sample/log에 저장됩니다.
+
+```bash
+M4_APP=./build-m4/rpi_vms \
+M4_MEASURE_SECONDS=120 \
+bash tools/measure-m4-load.sh
+```
+
+통합 시험 실패 시 다음 로그를 수집합니다.
+
+```bash
+grep -E 'state=connecting|state=streaming|pipeline_error|reconnecting|worker_failed|queue_drop' \
+  /tmp/rpi-vms-m4-integration.log
+sqlite3 -header -column /mnt/vms-storage/index/media.db \
+  'SELECT channel_id, camera_channel, updated_at_utc FROM vms_channels ORDER BY channel_id;'
+sqlite3 -header -column /mnt/vms-storage/index/media.db \
+  'SELECT channel_id, complete, size_bytes, file_path FROM recording_segments ORDER BY id DESC LIMIT 12;'
+findmnt -no TARGET,FSTYPE,SOURCE /mnt/vms-storage
+journalctl -k --since '-10 min' | grep -Ei 'usb|uas|scsi|ext4|reset|error'
 ```
