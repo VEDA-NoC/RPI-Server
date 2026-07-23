@@ -45,10 +45,10 @@ struct VmsConfig {
     int reconnect_delay_ms = 2000;
     int ingest_startup_timeout_ms = 15000;
     std::string live_listen_host = "0.0.0.0";
-    int rtsp_port = 8554;
-    int rtsps_port = 0;
-    std::string tls_cert_file;
-    std::string tls_key_file;
+    int rtsp_port = 0;
+    int rtsps_port = 8554;
+    std::string tls_cert_file = "certs/server.crt";
+    std::string tls_key_file = "certs/server.key";
     std::size_t live_client_queue_frames = 30;
     std::size_t live_client_queue_bytes = 8 * 1024 * 1024;
     std::size_t rtp_mtu = 1200;
@@ -107,8 +107,8 @@ void print_usage(const char* program) {
               << "  --reconnect-delay-ms 2000\n"
               << "  --ingest-startup-timeout-ms 15000\n"
               << "  --live-listen-host 0.0.0.0\n"
-              << "  --rtsp-port 8554 (0 disables plain RTSP)\n"
-              << "  --rtsps-port 0 (0 disables RTSPS)\n"
+              << "  --rtsp-port 0 (plain RTSP disabled by default)\n"
+              << "  --rtsps-port 8554 (0 disables RTSPS)\n"
               << "  --tls-cert certs/server.crt\n"
               << "  --tls-key certs/server.key\n"
               << "  --live-client-queue-frames 30\n"

@@ -57,6 +57,18 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME live_rtsp_server COMMAND live_rtsp_server_test)
 
+    find_program(BASH_EXECUTABLE bash)
+    find_program(PYTHON3_EXECUTABLE python3)
+    find_program(OPENSSL_EXECUTABLE openssl)
+    if(BASH_EXECUTABLE AND PYTHON3_EXECUTABLE AND OPENSSL_EXECUTABLE)
+        add_test(
+            NAME m4_rtsps_routing
+            COMMAND ${CMAKE_COMMAND} -E env M4_APP=$<TARGET_FILE:rpi_vms>
+                    ${BASH_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/test-m4-rtsps-routing.sh
+        )
+        set_tests_properties(m4_rtsps_routing PROPERTIES TIMEOUT 30)
+    endif()
+
     add_executable(rtsps_test_client tools/test_rtsps_client.cpp)
     target_link_libraries(rtsps_test_client PRIVATE OpenSSL::SSL OpenSSL::Crypto)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

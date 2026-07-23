@@ -2,21 +2,26 @@
 set -euo pipefail
 
 app="${M4_APP:-./build/rpi_vms}"
+client="${M4_RTSPS_CLIENT:-$(dirname -- "$app")/rtsps_test_client}"
 camera_host="${M4_CAMERA_HOST:-192.168.0.5}"
 storage_root="${M4_STORAGE_ROOT:-/mnt/vms-storage}"
+tls_cert="${M4_TLS_CERT:-certs/server.crt}"
+tls_key="${M4_TLS_KEY:-certs/server.key}"
 run_seconds="${M4_RUN_SECONDS:-75}"
 app_log="${M4_APP_LOG:-/tmp/rpi-vms-m4-integration.log}"
 
-for command in gst-launch-1.0 python3 sqlite3; do
+for command in openssl python3 sqlite3; do
     command -v "$command" >/dev/null || {
         echo "FAIL: required command not found: $command" >&2
         exit 1
     }
 done
-[[ -x "$app" ]] || {
-    echo "FAIL: app is not executable: $app" >&2
-    exit 1
-}
+for executable in "$app" "$client"; do
+    [[ -x "$executable" ]] || {
+        echo "FAIL: executable is not available: $executable" >&2
+        exit 1
+    }
+done
 if pgrep -x rpi_vms >/dev/null; then
     echo 'FAIL: another rpi_vms process is already running' >&2
     pgrep -af rpi_vms >&2
@@ -24,6 +29,24 @@ if pgrep -x rpi_vms >/dev/null; then
 fi
 
 : >"$app_log"
+temporary_tls_dir=''
+if [[ ! -r "$tls_cert" || ! -r "$tls_key" ]]; then
+    if [[ -e "$tls_cert" || -e "$tls_key" ]]; then
+        echo 'FAIL: only one TLS file exists; refusing to replace it' >&2
+        exit 1
+    fi
+    temporary_tls_dir="$(mktemp -d /tmp/rpi-vms-m4-tls.XXXXXX)"
+    tls_cert="$temporary_tls_dir/server.crt"
+    tls_key="$temporary_tls_dir/server.key"
+    openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+        -subj '/CN=localhost' \
+        -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' \
+        -keyout "$tls_key" \
+        -out "$tls_cert" \
+        >/dev/null 2>&1
+    chmod 600 "$tls_key"
+    echo 'INFO: using a temporary self-signed certificate for this automated RTSPS test'
+fi
 read -rsp 'Camera password: ' camera_password
 echo
 [[ -n "$camera_password" ]] || {
@@ -36,6 +59,7 @@ unset camera_password
 app_pid=''
 watchdog_pid=''
 client_pids=()
+client_labels=()
 cleanup() {
     for pid in "${client_pids[@]}"; do
         if kill -0 "$pid" 2>/dev/null; then
@@ -47,6 +71,10 @@ cleanup() {
     if [[ -n "$app_pid" ]] && kill -0 "$app_pid" 2>/dev/null; then
         kill -INT "$app_pid" 2>/dev/null || true
         wait "$app_pid" 2>/dev/null || true
+    fi
+    if [[ -n "$temporary_tls_dir" ]]; then
+        rm -f -- "$temporary_tls_dir/server.crt" "$temporary_tls_dir/server.key"
+        rmdir -- "$temporary_tls_dir" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT INT TERM
@@ -63,8 +91,10 @@ trap cleanup EXIT INT TERM
     --segment-seconds 60 \
     --db-busy-timeout-ms 5000 \
     --require-storage-mount \
-    --rtsp-port 8554 \
-    --rtsps-port 0 \
+    --rtsp-port 0 \
+    --rtsps-port 8554 \
+    --tls-cert "$tls_cert" \
+    --tls-key "$tls_key" \
     --live-client-queue-frames 3 \
     --log-level info \
     <&3 >"$app_log" 2>&1 &
@@ -93,32 +123,40 @@ watchdog_pid=$!
 
 attempts_before="$(grep -c 'state=connecting' "$app_log")"
 for channel_id in 1 2 3 4; do
-    gst-launch-1.0 -q \
-        rtspsrc location="rtsp://127.0.0.1:8554/ch${channel_id}" protocols=tcp latency=100 \
-        ! rtph264depay ! h264parse ! fakesink sync=false \
-        >"/tmp/rpi-vms-m4-ch${channel_id}.log" 2>&1 &
+    "$client" "rtsps://127.0.0.1:8554/ch${channel_id}" 20 \
+        >"/tmp/rpi-vms-m4-rtsps-ch${channel_id}.log" 2>&1 &
     client_pids+=("$!")
+    client_labels+=("ch${channel_id}")
 done
 python3 tools/test_slow_rtsp_client.py \
-    rtsp://127.0.0.1:8554/ch1 --pause-seconds 35 --receive-buffer 1024 \
-    >/tmp/rpi-vms-m4-slow-client.log 2>&1 &
+    rtsps://127.0.0.1:8554/ch1 --tls-insecure --pause-seconds 35 --receive-buffer 1024 \
+    >/tmp/rpi-vms-m4-rtsps-slow-client.log 2>&1 &
 client_pids+=("$!")
+client_labels+=("slow-ch1")
 
 sleep 40
-for pid in "${client_pids[@]}"; do
-    kill -INT "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
+client_failures=0
+for index in "${!client_pids[@]}"; do
+    pid="${client_pids[$index]}"
+    set +e
+    wait "$pid"
+    client_status=$?
+    set -e
+    if [[ "$client_status" -ne 0 ]]; then
+        echo "FAIL: RTSPS client ${client_labels[$index]} exit status=$client_status"
+        client_failures=$((client_failures + 1))
+    fi
 done
 client_pids=()
+client_labels=()
 attempts_after="$(grep -c 'state=connecting' "$app_log")"
 
-invalid_status="$(python3 - <<'PY'
-import socket
-s = socket.create_connection(("127.0.0.1", 8554), timeout=2)
-s.sendall(b"DESCRIBE rtsp://127.0.0.1:8554/ch5 RTSP/1.0\r\nCSeq: 1\r\n\r\n")
-print(s.recv(256).split(b"\r\n", 1)[0].decode())
-PY
-)" || true
+set +e
+python3 tools/probe_rtsp_status.py \
+    rtsps://127.0.0.1:8554/ch5 --tls-insecure --expect-status 404 \
+    >/tmp/rpi-vms-m4-rtsps-invalid-route.log 2>&1
+invalid_route_status=$?
+set -e
 
 kill -INT "$app_pid" 2>/dev/null || true
 set +e
@@ -130,7 +168,13 @@ kill "$watchdog_pid" 2>/dev/null || true
 wait "$watchdog_pid" 2>/dev/null || true
 watchdog_pid=''
 
-failures=0
+failures="$client_failures"
+if grep -q 'state=listening transport=rtsps' "$app_log"; then
+    echo 'PASS: RTSPS listener is active and plain RTSP is disabled'
+else
+    echo 'FAIL: RTSPS listener log is missing'
+    failures=$((failures + 1))
+fi
 if [[ "$app_status" -eq 0 ]]; then
     echo 'PASS: app exited cleanly'
 else
@@ -148,9 +192,25 @@ first_rtp_channels="$(
     sed -n '/state=first_rtp channel_id=/s/.*channel_id=\([1-4]\).*/\1/p' "$app_log" | sort -u | wc -l
 )"
 if [[ "$first_rtp_channels" -eq 4 ]]; then
-    echo 'PASS: /ch1..ch4 transmitted RTP'
+    echo 'PASS: /ch1..ch4 transmitted RTP over TLS'
 else
     echo "FAIL: RTP observed on $first_rtp_channels of 4 routes"
+    failures=$((failures + 1))
+fi
+for channel_id in 1 2 3 4; do
+    client_log="/tmp/rpi-vms-m4-rtsps-ch${channel_id}.log"
+    if grep -q '^TLS connected$' "$client_log" &&
+        grep -Eq '^FINAL RTP packets: [1-9][0-9]*, bytes: [1-9][0-9]*' "$client_log"; then
+        echo "PASS: RTSPS /ch${channel_id} completed TLS, RTSP control and RTP receive"
+    else
+        echo "FAIL: RTSPS /ch${channel_id} client evidence is incomplete"
+        failures=$((failures + 1))
+    fi
+done
+if grep -q '^PASS: RTSPS PLAY accepted' /tmp/rpi-vms-m4-rtsps-slow-client.log; then
+    echo 'PASS: slow RTSPS client completed PLAY before pausing reads'
+else
+    echo 'FAIL: slow RTSPS client did not complete PLAY'
     failures=$((failures + 1))
 fi
 
@@ -191,10 +251,11 @@ else
     echo 'PASS: ch0 was not created'
 fi
 
-if [[ "$invalid_status" == *'404'* ]]; then
-    echo 'PASS: invalid /ch5 route returned 404'
+if [[ "$invalid_route_status" -eq 0 ]]; then
+    echo 'PASS: invalid RTSPS /ch5 route returned 404'
 else
-    echo "FAIL: invalid /ch5 route did not return 404 (${invalid_status:-no response})"
+    echo 'FAIL: invalid RTSPS /ch5 route did not return 404'
+    sed -n '1,40p' /tmp/rpi-vms-m4-rtsps-invalid-route.log >&2
     failures=$((failures + 1))
 fi
 
@@ -214,4 +275,4 @@ if [[ "$failures" -ne 0 ]]; then
     echo "FAIL: M4 integration failures=$failures" >&2
     exit 1
 fi
-echo 'PASS: M4 four-channel integration test'
+echo 'PASS: M4 four-channel RTSPS integration test'

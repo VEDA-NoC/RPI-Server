@@ -89,9 +89,12 @@ bash tools/sync-to-pi.sh --build
 ## 실행 예시
 
 실제 운영 녹화는 외장 ext4 mount를 필수로 확인합니다. 카메라 password는 프로세스
-인자와 `ps` 출력에 남기지 않도록 표준 입력으로 전달합니다.
+인자와 `ps` 출력에 남기지 않도록 표준 입력으로 전달합니다. 제품 기본 live listener는
+plain RTSP를 끄고 RTSPS 8554를 사용하므로, 최초 개발 장치에서는 인증서를 한 번
+생성합니다.
 
 ```bash
+bash tools/generate-dev-tls-cert.sh
 read -rsp 'Camera password: ' CAMERA_PASSWORD
 echo
 printf '%s\n' "$CAMERA_PASSWORD" | ./build/rpi_vms \
@@ -107,8 +110,10 @@ printf '%s\n' "$CAMERA_PASSWORD" | ./build/rpi_vms \
   --segment-seconds 60 \
   --reconnect-delay-ms 2000 \
   --require-storage-mount \
-  --rtsp-port 8554 \
-  --rtsps-port 0 \
+  --rtsp-port 0 \
+  --rtsps-port 8554 \
+  --tls-cert certs/server.crt \
+  --tls-key certs/server.key \
   --log-level info
 unset CAMERA_PASSWORD
 ```
@@ -145,9 +150,15 @@ RTSPS 시험은 Git에서 제외된 `certs/server.crt`와 `certs/server.key`가 
 시험 종료 시 삭제합니다. 다른 기존 인증서를 사용할 때는 `M3_TLS_CERT`와
 `M3_TLS_KEY`로 경로만 지정합니다.
 
-Windows Qt viewer의 기본 재생 호환성을 확인할 때는 Pi에서 다음 스크립트를 실행한
-상태로 유지합니다. 출력된 `Qt Base URL`을 viewer 설정에 적용하면 M4 기본 mapping에서
-CH1~CH4를 재생할 수 있습니다.
+임시 인증서는 자동화된 client 시험에만 사용합니다. Windows Qt처럼 반복 접속하는
+interactive 시험에는 실행마다 인증서가 바뀌지 않도록 Pi에 유지되는 인증서를 먼저
+만듭니다. 스크립트는 기존 파일을 덮어쓰지 않습니다.
+
+```bash
+bash tools/generate-dev-tls-cert.sh
+```
+
+M3 legacy Qt smoke는 `/ch1`만 등록합니다.
 
 ```bash
 bash tools/run-m3-qt-smoke.sh
@@ -156,8 +167,10 @@ bash tools/run-m3-qt-smoke.sh
 ## M4 4채널 통합 및 부하 시험
 
 먼저 camera channel `0..3`이 모두 같은 profile 경로를 제공하는지 M4 통합 시험의
-`state=streaming` 로그로 확인합니다. 시험은 기존 DB와 영상 파일을 삭제하지 않고 새
-segment를 추가합니다.
+`state=streaming` 로그로 확인합니다. 서버는 plain RTSP를 끄고 RTSPS 8554만
+활성화합니다. `/ch1..ch4` 각각에서 TLS handshake, RTSP control, RTP 수신을 확인하고
+느린 TLS client와 invalid `/ch5`의 404도 검증합니다. 기존 DB와 영상 파일은 삭제하지
+않고 새 segment를 추가합니다.
 
 ```bash
 M4_APP=./build-m4/rpi_vms bash tools/test-m4-integration.sh
@@ -167,15 +180,19 @@ M4_APP=./build-m4/rpi_vms bash tools/test-m4-integration.sh
 
 ```text
 PASS: camera channels 0..3 are streaming as VMS channels 1..4
-PASS: /ch1..ch4 transmitted RTP
-PASS: invalid /ch5 route returned 404
+PASS: RTSPS listener is active and plain RTSP is disabled
+PASS: /ch1..ch4 transmitted RTP over TLS
+PASS: invalid RTSPS /ch5 route returned 404
 PASS: ch0 was not created
-PASS: M4 four-channel integration test
+PASS: M4 four-channel RTSPS integration test
 ```
 
 1채널과 4채널의 CPU, RSS, ext4 mount block write, camera NIC RX/TX, ICMP packet loss는
 동일한 측정 시간으로 순차 수집합니다. 기본 측정 시간은 각 120초이며 결과는
-`/tmp/rpi-vms-m4-load/summary.csv`와 raw sample/log에 저장됩니다.
+`/tmp/rpi-vms-m4-load/summary.csv`와 raw sample/log에 저장됩니다. 기본값은 채널마다
+로컬 RTSPS client 하나를 연결해 TLS 암호화와 live fan-out 부하도 포함하고, summary에
+수신 RTP byte를 기록합니다. ingest-only 기준이 필요할 때만
+`M4_LOAD_RTSPS_CLIENTS=0`을 명시합니다.
 
 ```bash
 M4_APP=./build-m4/rpi_vms \
@@ -183,11 +200,23 @@ M4_MEASURE_SECONDS=120 \
 bash tools/measure-m4-load.sh
 ```
 
+Windows Qt 4채널 smoke는 같은 persistent 인증서로 서버를 유지합니다. 출력된
+`Qt Base URL`을 viewer에 적용하고 CH1~CH4가 모두 `Playing`인지 확인합니다.
+
+```bash
+M4_APP=./build-m4/rpi_vms bash tools/run-m4-qt-smoke.sh
+```
+
+`run-m4-qt-smoke.sh`는 인증서가 없을 때 임시 인증서를 만들지 않고
+`generate-dev-tls-cert.sh` 실행을 요구합니다. 자동 통합시험의 임시 인증서와 실제 Qt
+접속 인증서를 구분하기 위한 동작입니다.
+
 통합 시험 실패 시 다음 로그를 수집합니다.
 
 ```bash
 grep -E 'state=connecting|state=streaming|pipeline_error|reconnecting|worker_failed|queue_drop' \
   /tmp/rpi-vms-m4-integration.log
+for log in /tmp/rpi-vms-m4-rtsps-*.log; do echo "=== $log ==="; tail -n 30 "$log"; done
 sqlite3 -header -column /mnt/vms-storage/index/media.db \
   'SELECT channel_id, camera_channel, updated_at_utc FROM vms_channels ORDER BY channel_id;'
 sqlite3 -header -column /mnt/vms-storage/index/media.db \
