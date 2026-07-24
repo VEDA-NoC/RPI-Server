@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import socket
+import ssl
 import sys
 import time
 from urllib.parse import urlsplit
@@ -58,25 +59,53 @@ def request(
     return response_headers, body
 
 
+def connect(
+    scheme: str,
+    host: str,
+    port: int,
+    timeout: float,
+    tls_insecure: bool,
+    tls_ca: str | None,
+) -> socket.socket:
+    raw = socket.create_connection((host, port), timeout=timeout)
+    if scheme == "rtsp":
+        return raw
+
+    context = ssl.create_default_context(cafile=tls_ca)
+    if tls_insecure:
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    try:
+        return context.wrap_socket(raw, server_hostname=host)
+    except Exception:
+        raw.close()
+        raise
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("uri", help="RTSP URI, for example rtsp://127.0.0.1:8554/ch1")
+    parser.add_argument("uri", help="RTSP or RTSPS URI")
     parser.add_argument("--pause-seconds", type=float, default=35.0)
     parser.add_argument("--receive-buffer", type=int, default=1024)
+    parser.add_argument("--tls-insecure", action="store_true")
+    parser.add_argument("--tls-ca")
     args = parser.parse_args()
 
     parsed = urlsplit(args.uri)
-    if parsed.scheme != "rtsp" or not parsed.hostname:
-        parser.error("uri must be an rtsp:// URI with a host")
+    if parsed.scheme not in {"rtsp", "rtsps"} or not parsed.hostname:
+        parser.error("uri must use rtsp:// or rtsps:// and include a host")
     if args.pause_seconds <= 0 or args.receive_buffer <= 0:
         parser.error("pause-seconds and receive-buffer must be positive")
+    if parsed.scheme == "rtsp" and (args.tls_insecure or args.tls_ca):
+        parser.error("TLS options require an rtsps:// URI")
+    if args.tls_insecure and args.tls_ca:
+        parser.error("--tls-insecure and --tls-ca are mutually exclusive")
 
-    port = parsed.port or 554
+    port = parsed.port or (322 if parsed.scheme == "rtsps" else 554)
     base_uri = args.uri.rstrip("/")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    with connect(parsed.scheme, parsed.hostname, port, 10.0, args.tls_insecure, args.tls_ca) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, args.receive_buffer)
         sock.settimeout(10.0)
-        sock.connect((parsed.hostname, port))
 
         request(sock, "OPTIONS", base_uri, 1)
         request(sock, "DESCRIBE", base_uri, 2, {"Accept": "application/sdp"})
@@ -93,7 +122,10 @@ def main() -> int:
         request(sock, "PLAY", base_uri, 4, {"Session": session})
 
         sock.settimeout(None)
-        print(f"PASS: PLAY accepted; pausing reads for {args.pause_seconds:g} seconds", flush=True)
+        print(
+            f"PASS: {parsed.scheme.upper()} PLAY accepted; pausing reads for {args.pause_seconds:g} seconds",
+            flush=True,
+        )
         time.sleep(args.pause_seconds)
         print("PASS: slow client pause completed", flush=True)
     return 0

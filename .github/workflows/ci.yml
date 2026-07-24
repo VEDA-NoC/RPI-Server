@@ -92,4 +92,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Test time offset measurement tool
-        run: python3 -m unittest tools/test_measure_time_offsets.py
+        run: |
+          python3 -m unittest \
+            tools/test_measure_time_offsets.py \
+            tools/test_rtsp_test_clients.py

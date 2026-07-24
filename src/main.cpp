@@ -1,4 +1,5 @@
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -7,9 +8,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include "rtsps/app_config.h"
 #include "rtsps/channel_ingest.h"
+#include "rtsps/channel_manager.h"
 #include "rtsps/live_rtsp_server.h"
 #include "rtsps/logger.h"
 #include "rtsps/recording_index.h"
@@ -29,19 +33,23 @@ struct VmsConfig {
     bool camera_password_stdin = false;
     std::string camera_path_template = "/{camera_channel}/profile2/media.smp";
     int camera_channel = 0;
+    bool legacy_mapping_set = false;
+    std::string channel_map;
     std::string storage_root = "/mnt/vms-storage";
     std::string media_db;
     int channel_id = 1;
+    int db_busy_timeout_ms = 5000;
     rtsps::VideoCodec codec = rtsps::VideoCodec::H264;
     int latency_ms = 200;
     int segment_seconds = 60;
     int reconnect_delay_ms = 2000;
-    int ingest_startup_timeout_ms = 15000;
+    int ingest_startup_timeout_ms = 5000;
+    int channel_start_delay_ms = 0;
     std::string live_listen_host = "0.0.0.0";
-    int rtsp_port = 8554;
-    int rtsps_port = 0;
-    std::string tls_cert_file;
-    std::string tls_key_file;
+    int rtsp_port = 0;
+    int rtsps_port = 8554;
+    std::string tls_cert_file = "certs/server.crt";
+    std::string tls_key_file = "certs/server.key";
     std::size_t live_client_queue_frames = 30;
     std::size_t live_client_queue_bytes = 8 * 1024 * 1024;
     std::size_t rtp_mtu = 1200;
@@ -88,18 +96,21 @@ void print_usage(const char* program) {
               << "  --camera-password PASSWORD (legacy; visible in process arguments)\n"
               << "  --camera-password-stdin\n"
               << "  --camera-path-template '/{camera_channel}/profile2/media.smp'\n"
-              << "  --camera-channel 0\n"
+              << "  --channel-map '0:1,1:2,2:3,3:4'\n"
+              << "  --camera-channel 0 (legacy single-channel mapping)\n"
               << "  --storage-root /mnt/vms-storage\n"
               << "  --media-db /mnt/vms-storage/index/media.db\n"
-              << "  --channel-id 1\n"
+              << "  --channel-id 1 (legacy single-channel mapping)\n"
+              << "  --db-busy-timeout-ms 5000\n"
               << "  --codec h264|h265\n"
               << "  --latency-ms 200\n"
               << "  --segment-seconds 60\n"
               << "  --reconnect-delay-ms 2000\n"
-              << "  --ingest-startup-timeout-ms 15000\n"
+              << "  --ingest-startup-timeout-ms 5000\n"
+              << "  --channel-start-delay-ms 0\n"
               << "  --live-listen-host 0.0.0.0\n"
-              << "  --rtsp-port 8554 (0 disables plain RTSP)\n"
-              << "  --rtsps-port 0 (0 disables RTSPS)\n"
+              << "  --rtsp-port 0 (plain RTSP disabled by default)\n"
+              << "  --rtsps-port 8554 (0 disables RTSPS)\n"
               << "  --tls-cert certs/server.crt\n"
               << "  --tls-key certs/server.key\n"
               << "  --live-client-queue-frames 30\n"
@@ -133,16 +144,22 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.camera_password_stdin = true;
         else if (arg == "--camera-path-template")
             config.camera_path_template = need_value(arg);
-        else if (arg == "--camera-channel")
+        else if (arg == "--camera-channel") {
             config.camera_channel = parse_int(arg, need_value(arg), 0, 3);
+            config.legacy_mapping_set = true;
+        } else if (arg == "--channel-map")
+            config.channel_map = need_value(arg);
         else if (arg == "--rtsp-url")
             throw std::runtime_error("--rtsp-url is not used; pass camera fields instead");
         else if (arg == "--storage-root")
             config.storage_root = need_value(arg);
         else if (arg == "--media-db")
             config.media_db = need_value(arg);
-        else if (arg == "--channel-id")
+        else if (arg == "--channel-id") {
             config.channel_id = parse_int(arg, need_value(arg), 1, 4);
+            config.legacy_mapping_set = true;
+        } else if (arg == "--db-busy-timeout-ms")
+            config.db_busy_timeout_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--codec")
             config.codec = rtsps::parse_video_codec(need_value(arg));
         else if (arg == "--latency-ms")
@@ -153,6 +170,8 @@ VmsConfig parse_vms_args(int argc, char** argv) {
             config.reconnect_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--ingest-startup-timeout-ms")
             config.ingest_startup_timeout_ms = parse_int(arg, need_value(arg), 1000, 300000);
+        else if (arg == "--channel-start-delay-ms")
+            config.channel_start_delay_ms = parse_int(arg, need_value(arg), 0, 60000);
         else if (arg == "--live-listen-host")
             config.live_listen_host = need_value(arg);
         else if (arg == "--rtsp-port")
@@ -207,6 +226,14 @@ VmsConfig parse_vms_args(int argc, char** argv) {
     if (config.camera_password.empty()) {
         throw std::runtime_error("--camera-password or --camera-password-stdin is required");
     }
+    if (config.legacy_mapping_set && !config.channel_map.empty()) {
+        throw std::runtime_error("--channel-map cannot be combined with --camera-channel or --channel-id");
+    }
+    if (config.channel_map.empty()) {
+        config.channel_map = config.legacy_mapping_set
+                                 ? std::to_string(config.camera_channel) + ":" + std::to_string(config.channel_id)
+                                 : "0:1,1:2,2:3,3:4";
+    }
     if (config.rtsp_port == 0 && config.rtsps_port == 0) {
         throw std::runtime_error("at least one of --rtsp-port or --rtsps-port must be enabled");
     }
@@ -234,8 +261,8 @@ std::string replace_all(std::string value, const std::string& from, const std::s
     return value;
 }
 
-std::string build_camera_rtsp_location(const VmsConfig& config) {
-    const std::string camera_channel = std::to_string(config.camera_channel);
+std::string build_camera_rtsp_location(const VmsConfig& config, int camera_channel_id) {
+    const std::string camera_channel = std::to_string(camera_channel_id);
     std::string path = replace_all(config.camera_path_template, "{camera_channel}", camera_channel);
     path = replace_all(path, "{channel}", camera_channel);
     if (path.empty() || path.front() != '/') {
@@ -264,28 +291,13 @@ int main(int argc, char** argv) {
             return 2;
         }
 
-        rtsps::RecordingIndex index(config.media_db, logger);
+        rtsps::RecordingIndex index(config.media_db, logger, config.db_busy_timeout_ms);
         index.open();
         index.initialize_schema();
 
-        const std::string output_dir =
-            (std::filesystem::path(config.storage_root) / "recordings" / ("ch" + std::to_string(config.channel_id)))
-                .string();
-        logger.info("[channel] channel_id=" + std::to_string(config.channel_id) +
-                    " camera_channel=" + std::to_string(config.camera_channel) + " storage=" + output_dir);
-
-        rtsps::ChannelIngestConfig ingest_config;
-        ingest_config.rtsp_location = build_camera_rtsp_location(config);
-        ingest_config.camera_user = config.camera_user;
-        ingest_config.camera_password = config.camera_password;
-        ingest_config.output_dir = output_dir;
-        ingest_config.camera_channel = config.camera_channel;
-        ingest_config.channel_id = config.channel_id;
-        ingest_config.codec = config.codec;
-        ingest_config.latency_ms = config.latency_ms;
-        ingest_config.segment_seconds = config.segment_seconds;
-        ingest_config.reconnect_delay_ms = config.reconnect_delay_ms;
-        ingest_config.startup_timeout_ms = config.ingest_startup_timeout_ms;
+        const std::vector<rtsps::ChannelMapping> mappings = rtsps::parse_channel_map(config.channel_map);
+        std::vector<rtsps::ChannelIngestConfig> ingest_configs;
+        ingest_configs.reserve(mappings.size());
 
         rtsps::LiveRtspServerConfig live_config;
         live_config.listen_host = config.live_listen_host;
@@ -296,22 +308,51 @@ int main(int argc, char** argv) {
         live_config.client_queue_frames = config.live_client_queue_frames;
         live_config.client_queue_bytes = config.live_client_queue_bytes;
         live_config.rtp_mtu = config.rtp_mtu;
-        live_config.channel_id = config.channel_id;
-        live_config.codec = config.codec;
+        for (const auto& mapping : mappings) {
+            index.upsert_channel_mapping(mapping.channel_id, mapping.camera_channel);
+            rtsps::ChannelIngestConfig ingest_config;
+            ingest_config.rtsp_location = build_camera_rtsp_location(config, mapping.camera_channel);
+            ingest_config.camera_user = config.camera_user;
+            ingest_config.camera_password = config.camera_password;
+            ingest_config.output_dir = rtsps::channel_output_dir(config.storage_root, mapping.channel_id);
+            ingest_config.camera_channel = mapping.camera_channel;
+            ingest_config.channel_id = mapping.channel_id;
+            ingest_config.codec = config.codec;
+            ingest_config.latency_ms = config.latency_ms;
+            ingest_config.segment_seconds = config.segment_seconds;
+            ingest_config.reconnect_delay_ms = config.reconnect_delay_ms;
+            ingest_config.startup_timeout_ms = config.ingest_startup_timeout_ms;
+            std::filesystem::create_directories(ingest_config.output_dir);
+            logger.info("[channel] channel_id=" + std::to_string(mapping.channel_id) + " camera_channel=" +
+                        std::to_string(mapping.camera_channel) + " storage=" + ingest_config.output_dir);
+            ingest_configs.push_back(std::move(ingest_config));
+            live_config.channels.push_back({mapping.channel_id, config.codec});
+        }
 
         rtsps::LiveRtspServer live_server(live_config, logger, g_running);
         live_server.start();
 
-        // The process-owned ingest starts independently and fans compressed AUs into bounded client queues.
-        rtsps::ChannelIngest ingest(ingest_config, index, logger, g_running, &live_server);
-        const int result = ingest.run();
+        rtsps::ChannelManager channel_manager(std::move(ingest_configs), index, logger, g_running, &live_server,
+                                              config.channel_start_delay_ms);
+        channel_manager.start();
+        while (g_running.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        channel_manager.stop();
         live_server.stop();
+        for (const auto& channel : channel_manager.stats()) {
+            logger.info("[channel] state=stopped channel_id=" + std::to_string(channel.mapping.channel_id) +
+                        " camera_channel=" + std::to_string(channel.mapping.camera_channel) +
+                        " attempts=" + std::to_string(channel.ingest.connection_attempts) +
+                        " reconnects=" + std::to_string(channel.ingest.reconnects) +
+                        " worker_failed=" + (channel.worker_failed ? "yes" : "no"));
+        }
         const rtsps::LiveRtspServerStats live_stats = live_server.stats();
         logger.info("[live-server] sessions_created=" + std::to_string(live_stats.sessions_created) +
                     " sessions_closed=" + std::to_string(live_stats.sessions_closed) +
                     " first_rtp=" + std::to_string(live_stats.first_rtp_transmissions) +
                     " queue_drops=" + std::to_string(live_stats.queue_drops));
-        return result;
+        return 0;
     } catch (const std::exception& ex) {
         std::cerr << "error: " << ex.what() << "\n";
         return 1;

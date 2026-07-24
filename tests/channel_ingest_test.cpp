@@ -48,6 +48,8 @@ void test_product_topology() {
     require(pipeline.find(config.camera_user) == std::string::npos, "pipeline description contains the camera user");
     require(pipeline.find(config.camera_password) == std::string::npos,
             "pipeline description contains the camera password");
+    require(pipeline.find("teardown-timeout=2000000000") != std::string::npos,
+            "RTSP source does not allow enough time to send TEARDOWN");
     require(pipeline.find("rtph264depay ! h264parse config-interval=-1 ! video/x-h264,alignment=au ! tee") !=
                 std::string::npos,
             "tee is not placed after H.264 depay/parse/AU alignment");

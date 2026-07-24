@@ -43,7 +43,7 @@ struct ChannelIngestConfig {
     int latency_ms = 200;
     std::int64_t segment_seconds = 60;
     int reconnect_delay_ms = 2000;
-    int startup_timeout_ms = 15000;
+    int startup_timeout_ms = 5000;
     unsigned int live_queue_max_buffers = 1;
 };
 
