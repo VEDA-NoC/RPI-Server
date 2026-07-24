@@ -10,9 +10,9 @@ tls_key="${M4_TLS_KEY:-certs/server.key}"
 duration="${M4_MEASURE_SECONDS:-120}"
 result_dir="${M4_RESULT_DIR:-/tmp/rpi-vms-m4-load}"
 enable_rtsps_clients="${M4_LOAD_RTSPS_CLIENTS:-1}"
-startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-45000}"
+startup_timeout_ms="${M4_INGEST_STARTUP_TIMEOUT_MS:-5000}"
 readiness_timeout_seconds="${M4_INGEST_READINESS_TIMEOUT_SECONDS:-150}"
-channel_start_delay_ms="${M4_CHANNEL_START_DELAY_MS:-5000}"
+channel_start_delay_ms="${M4_CHANNEL_START_DELAY_MS:-0}"
 
 for command in findmnt ip ping getconf awk sqlite3 openssl; do
     command -v "$command" >/dev/null || {

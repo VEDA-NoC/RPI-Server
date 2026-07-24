@@ -16,17 +16,27 @@ namespace rtsps {
 namespace {
 
 struct CallbackContext {
-    const ChannelIngestConfig& config;
-    RecordingIndex& index;
-    Logger& logger;
-    LiveFrameSink* live_sink;
-    std::atomic<bool>& first_buffer_seen;
-    std::atomic<std::uint64_t>& first_buffers;
-    std::atomic<std::uint64_t>& live_frames;
-    std::atomic<std::uint64_t>& live_drops;
+    const ChannelIngestConfig &config;
+    RecordingIndex &index;
+    Logger &logger;
+    LiveFrameSink *live_sink;
+    std::uint64_t attempt;
+    std::chrono::steady_clock::time_point attempt_started_at;
+    std::atomic<bool> &first_rtp_buffer_seen;
+    std::atomic<bool> &attempt_first_buffer_seen;
+    std::atomic<bool> &first_buffer_seen;
+    std::atomic<std::uint64_t> &first_buffers;
+    std::atomic<std::uint64_t> &live_frames;
+    std::atomic<std::uint64_t> &live_drops;
 };
 
-std::string quote_for_gst_parse(const std::string& value) {
+std::int64_t attempt_elapsed_ms(const CallbackContext &context) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                 context.attempt_started_at)
+        .count();
+}
+
+std::string quote_for_gst_parse(const std::string &value) {
     std::string out = "\"";
     for (char ch : value) {
         if (ch == '"' || ch == '\\') {
@@ -39,8 +49,8 @@ std::string quote_for_gst_parse(const std::string& value) {
 }
 
 std::string redact_rtsp_userinfo(std::string text) {
-    constexpr const char* schemes[] = {"rtsp://", "rtsps://"};
-    for (const char* scheme : schemes) {
+    constexpr const char *schemes[] = {"rtsp://", "rtsps://"};
+    for (const char *scheme : schemes) {
         const std::string scheme_text(scheme);
         std::size_t search_from = 0;
         while (true) {
@@ -53,7 +63,7 @@ std::string redact_rtsp_userinfo(std::string text) {
             const std::size_t authority_end = text.find_first_of("/ \t\r\n\"", userinfo_start);
             const std::size_t separator = text.find('@', userinfo_start);
             if (separator != std::string::npos && (authority_end == std::string::npos || separator < authority_end)) {
-                constexpr const char* replacement = "<redacted>";
+                constexpr const char *replacement = "<redacted>";
                 text.replace(userinfo_start, separator - userinfo_start, replacement);
                 search_from = userinfo_start + std::char_traits<char>::length(replacement) + 1;
             } else {
@@ -68,14 +78,14 @@ std::int64_t buffer_clock_time(GstClockTime value) {
     return GST_CLOCK_TIME_IS_VALID(value) ? static_cast<std::int64_t>(value) : -1;
 }
 
-void handle_element_message(GstMessage* message, CallbackContext& context) {
-    const GstStructure* structure = gst_message_get_structure(message);
+void handle_element_message(GstMessage *message, CallbackContext &context) {
+    const GstStructure *structure = gst_message_get_structure(message);
     if (!structure) {
         return;
     }
 
-    const char* name = gst_structure_get_name(structure);
-    const char* location = gst_structure_get_string(structure, "location");
+    const char *name = gst_structure_get_name(structure);
+    const char *location = gst_structure_get_string(structure, "location");
     if (!name || !location) {
         return;
     }
@@ -91,26 +101,85 @@ void handle_element_message(GstMessage* message, CallbackContext& context) {
     }
 }
 
-GstPadProbeReturn on_ingest_buffer(GstPad*, GstPadProbeInfo* info, gpointer user_data) {
-    auto& context = *static_cast<CallbackContext*>(user_data);
+GstPadProbeReturn on_ingest_buffer(GstPad *, GstPadProbeInfo *info, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
+    if (!(GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER)) {
+        return GST_PAD_PROBE_OK;
+    }
+
+    bool attempt_expected = false;
+    if (context.attempt_first_buffer_seen.compare_exchange_strong(attempt_expected, true)) {
+        bool channel_expected = false;
+        if (context.first_buffer_seen.compare_exchange_strong(channel_expected, true)) {
+            context.first_buffers.fetch_add(1);
+        }
+        GstBuffer *buffer = GST_PAD_PROBE_INFO_BUFFER(info);
+        const std::int64_t pts_ns = buffer ? buffer_clock_time(GST_BUFFER_PTS(buffer)) : -1;
+        context.logger.info(
+            "[ingest] state=streaming first_buffer=yes channel_id=" + std::to_string(context.config.channel_id) +
+            " camera_channel=" + std::to_string(context.config.camera_channel) +
+            " attempt=" + std::to_string(context.attempt) +
+            " elapsed_ms=" + std::to_string(attempt_elapsed_ms(context)) + " pts_ns=" + std::to_string(pts_ns));
+    }
+    return GST_PAD_PROBE_OK;
+}
+
+GstPadProbeReturn on_rtp_buffer(GstPad *, GstPadProbeInfo *info, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
     if (!(GST_PAD_PROBE_INFO_TYPE(info) & GST_PAD_PROBE_TYPE_BUFFER)) {
         return GST_PAD_PROBE_OK;
     }
 
     bool expected = false;
-    if (context.first_buffer_seen.compare_exchange_strong(expected, true)) {
-        context.first_buffers.fetch_add(1);
-        GstBuffer* buffer = GST_PAD_PROBE_INFO_BUFFER(info);
+    if (context.first_rtp_buffer_seen.compare_exchange_strong(expected, true)) {
+        GstBuffer *buffer = GST_PAD_PROBE_INFO_BUFFER(info);
         const std::int64_t pts_ns = buffer ? buffer_clock_time(GST_BUFFER_PTS(buffer)) : -1;
         context.logger.info(
-            "[ingest] state=streaming first_buffer=yes channel_id=" + std::to_string(context.config.channel_id) +
-            " camera_channel=" + std::to_string(context.config.camera_channel) + " pts_ns=" + std::to_string(pts_ns));
+            "[ingest] state=rtp_received first_buffer=yes channel_id=" + std::to_string(context.config.channel_id) +
+            " camera_channel=" + std::to_string(context.config.camera_channel) +
+            " attempt=" + std::to_string(context.attempt) +
+            " elapsed_ms=" + std::to_string(attempt_elapsed_ms(context)) + " pts_ns=" + std::to_string(pts_ns));
     }
     return GST_PAD_PROBE_OK;
 }
 
-void on_live_handoff(GstElement*, GstBuffer* buffer, GstPad*, gpointer user_data) {
-    auto& context = *static_cast<CallbackContext*>(user_data);
+void on_source_sdp(GstElement *, gpointer, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
+    context.logger.info("[ingest] state=sdp_received channel_id=" + std::to_string(context.config.channel_id) +
+                        " camera_channel=" + std::to_string(context.config.camera_channel) + " attempt=" +
+                        std::to_string(context.attempt) + " elapsed_ms=" + std::to_string(attempt_elapsed_ms(context)));
+}
+
+void on_source_pad_added(GstElement *, GstPad *pad, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
+    GstCaps *caps = gst_pad_get_current_caps(pad);
+    if (!caps) {
+        caps = gst_pad_query_caps(pad, nullptr);
+    }
+    if (!caps || gst_caps_is_empty(caps)) {
+        if (caps) {
+            gst_caps_unref(caps);
+        }
+        return;
+    }
+
+    const GstStructure *structure = gst_caps_get_structure(caps, 0);
+    const char *media = structure ? gst_structure_get_string(structure, "media") : nullptr;
+    const bool is_video_rtp =
+        structure && gst_structure_has_name(structure, "application/x-rtp") && media && std::string(media) == "video";
+    gst_caps_unref(caps);
+    if (!is_video_rtp) {
+        return;
+    }
+
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, on_rtp_buffer, &context, nullptr);
+    context.logger.info("[ingest] state=rtp_pad_ready channel_id=" + std::to_string(context.config.channel_id) +
+                        " camera_channel=" + std::to_string(context.config.camera_channel) + " attempt=" +
+                        std::to_string(context.attempt) + " elapsed_ms=" + std::to_string(attempt_elapsed_ms(context)));
+}
+
+void on_live_handoff(GstElement *, GstBuffer *buffer, GstPad *, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
     context.live_frames.fetch_add(1);
     if (!context.live_sink || !buffer) {
         return;
@@ -132,7 +201,7 @@ void on_live_handoff(GstElement*, GstBuffer* buffer, GstPad*, gpointer user_data
                                      context.config.codec};
     try {
         context.live_sink->on_frame(frame);
-    } catch (const std::exception& ex) {
+    } catch (const std::exception &ex) {
         context.logger.error(std::string("[live] state=sink_error message=") + ex.what());
     } catch (...) {
         context.logger.error("[live] state=sink_error message=unknown");
@@ -140,8 +209,8 @@ void on_live_handoff(GstElement*, GstBuffer* buffer, GstPad*, gpointer user_data
     gst_buffer_unmap(buffer, &map);
 }
 
-void on_live_queue_overrun(GstElement*, gpointer user_data) {
-    auto& context = *static_cast<CallbackContext*>(user_data);
+void on_live_queue_overrun(GstElement *, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
     const std::uint64_t drops = context.live_drops.fetch_add(1) + 1;
     if (drops == 1 || drops % 100 == 0) {
         context.logger.warn("[live] state=dropping policy=latest channel_id=" +
@@ -149,8 +218,8 @@ void on_live_queue_overrun(GstElement*, gpointer user_data) {
     }
 }
 
-gchar* on_format_segment_location(GstElement*, guint, GstSample*, gpointer user_data) {
-    auto& context = *static_cast<CallbackContext*>(user_data);
+gchar *on_format_segment_location(GstElement *, guint, GstSample *, gpointer user_data) {
+    auto &context = *static_cast<CallbackContext *>(user_data);
     try {
         const auto now = std::chrono::system_clock::now().time_since_epoch();
         const auto utc_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
@@ -161,7 +230,7 @@ gchar* on_format_segment_location(GstElement*, guint, GstSample*, gpointer user_
             location = build_segment_path(context.config, utc_ms, collision_index);
         }
         return g_strdup(location.c_str());
-    } catch (const std::exception& ex) {
+    } catch (const std::exception &ex) {
         context.logger.error(std::string("[record] state=location_error message=") + ex.what());
         return nullptr;
     } catch (...) {
@@ -170,8 +239,8 @@ gchar* on_format_segment_location(GstElement*, guint, GstSample*, gpointer user_
     }
 }
 
-void configure_source(GstElement* pipeline, const ChannelIngestConfig& config) {
-    GstElement* source = gst_bin_get_by_name(GST_BIN(pipeline), "camera_source");
+void configure_source(GstElement *pipeline, const ChannelIngestConfig &config) {
+    GstElement *source = gst_bin_get_by_name(GST_BIN(pipeline), "camera_source");
     if (!source) {
         throw std::runtime_error("pipeline is missing camera_source");
     }
@@ -180,20 +249,24 @@ void configure_source(GstElement* pipeline, const ChannelIngestConfig& config) {
     gst_object_unref(source);
 }
 
-void connect_callbacks(GstElement* pipeline, CallbackContext& context) {
-    GstElement* tee = gst_bin_get_by_name(GST_BIN(pipeline), "ingest_tee");
-    GstElement* recording_sink = gst_bin_get_by_name(GST_BIN(pipeline), "recording_sink");
-    GstElement* live_queue = gst_bin_get_by_name(GST_BIN(pipeline), "live_queue");
-    GstElement* live_sink = gst_bin_get_by_name(GST_BIN(pipeline), "live_test_sink");
-    if (!tee || !recording_sink || !live_queue || !live_sink) {
+void connect_callbacks(GstElement *pipeline, CallbackContext &context) {
+    GstElement *source = gst_bin_get_by_name(GST_BIN(pipeline), "camera_source");
+    GstElement *tee = gst_bin_get_by_name(GST_BIN(pipeline), "ingest_tee");
+    GstElement *recording_sink = gst_bin_get_by_name(GST_BIN(pipeline), "recording_sink");
+    GstElement *live_queue = gst_bin_get_by_name(GST_BIN(pipeline), "live_queue");
+    GstElement *live_sink = gst_bin_get_by_name(GST_BIN(pipeline), "live_test_sink");
+    if (!source || !tee || !recording_sink || !live_queue || !live_sink) {
+        if (source) gst_object_unref(source);
         if (tee) gst_object_unref(tee);
         if (recording_sink) gst_object_unref(recording_sink);
         if (live_queue) gst_object_unref(live_queue);
         if (live_sink) gst_object_unref(live_sink);
         throw std::runtime_error("pipeline is missing a ChannelIngest branch element");
     }
+    g_signal_connect(source, "on-sdp", G_CALLBACK(on_source_sdp), &context);
+    g_signal_connect(source, "pad-added", G_CALLBACK(on_source_pad_added), &context);
 
-    GstPad* tee_sink = gst_element_get_static_pad(tee, "sink");
+    GstPad *tee_sink = gst_element_get_static_pad(tee, "sink");
     if (!tee_sink) {
         gst_object_unref(tee);
         gst_object_unref(recording_sink);
@@ -207,6 +280,7 @@ void connect_callbacks(GstElement* pipeline, CallbackContext& context) {
     g_signal_connect(live_sink, "handoff", G_CALLBACK(on_live_handoff), &context);
 
     gst_object_unref(tee_sink);
+    gst_object_unref(source);
     gst_object_unref(tee);
     gst_object_unref(recording_sink);
     gst_object_unref(live_queue);
@@ -215,7 +289,7 @@ void connect_callbacks(GstElement* pipeline, CallbackContext& context) {
 
 }  // namespace
 
-VideoCodec parse_video_codec(const std::string& value) {
+VideoCodec parse_video_codec(const std::string &value) {
     if (value == "h264" || value == "H264") {
         return VideoCodec::H264;
     }
@@ -229,8 +303,8 @@ std::string to_gst_encoding_name(VideoCodec codec) { return codec == VideoCodec:
 
 std::string to_codec_name(VideoCodec codec) { return codec == VideoCodec::H265 ? "h265" : "h264"; }
 
-std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig& config,
-                                                      const std::string& location_pattern) {
+std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig &config,
+                                                      const std::string &location_pattern) {
     const std::string encoding = to_gst_encoding_name(config.codec);
     const std::string depay = config.codec == VideoCodec::H264 ? "rtph264depay" : "rtph265depay";
     const std::string parse =
@@ -240,7 +314,8 @@ std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig&
     const std::int64_t segment_ns = config.segment_seconds * 1000000000LL;
 
     std::ostringstream pipeline;
-    pipeline << "rtspsrc name=camera_source protocols=tcp latency=" << config.latency_ms << ' '
+    pipeline << "rtspsrc name=camera_source protocols=tcp latency=" << config.latency_ms
+             << " teardown-timeout=2000000000 "
              << "camera_source. ! application/x-rtp,media=video,encoding-name=" << encoding << " ! " << depay << " ! "
              << parse << " ! " << alignment_caps << " ! tee name=ingest_tee "
              << "ingest_tee. ! queue name=recording_queue leaky=no ! "
@@ -252,7 +327,7 @@ std::string build_channel_ingest_pipeline_description(const ChannelIngestConfig&
     return pipeline.str();
 }
 
-std::string build_segment_path(const ChannelIngestConfig& config, std::int64_t segment_start_utc_ms,
+std::string build_segment_path(const ChannelIngestConfig &config, std::int64_t segment_start_utc_ms,
                                std::uint32_t collision_index) {
     const std::time_t segment_start_utc = static_cast<std::time_t>(segment_start_utc_ms / 1000);
     const std::int64_t milliseconds = segment_start_utc_ms % 1000;
@@ -269,8 +344,8 @@ std::string build_segment_path(const ChannelIngestConfig& config, std::int64_t s
     return (std::filesystem::path(config.output_dir) / filename.str()).string();
 }
 
-ChannelIngest::ChannelIngest(ChannelIngestConfig config, RecordingIndex& index, Logger& logger,
-                             std::atomic<bool>& running, LiveFrameSink* live_sink)
+ChannelIngest::ChannelIngest(ChannelIngestConfig config, RecordingIndex &index, Logger &logger,
+                             std::atomic<bool> &running, LiveFrameSink *live_sink)
     : config_(std::move(config)), index_(index), logger_(logger), running_(running), live_sink_(live_sink) {
     if (config_.camera_channel < 0 || config_.camera_channel > 3) {
         throw std::runtime_error("camera_channel out of range (0-3)");
@@ -288,7 +363,7 @@ ChannelIngest::ChannelIngest(ChannelIngestConfig config, RecordingIndex& index, 
 
 int ChannelIngest::run() {
     int argc = 0;
-    char** argv = nullptr;
+    char **argv = nullptr;
     gst_init(&argc, &argv);
 
     while (running_.load()) {
@@ -322,12 +397,12 @@ int ChannelIngest::run() {
 }
 
 ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
-    GError* parse_error = nullptr;
+    GError *parse_error = nullptr;
     const std::string pipeline_description =
         build_channel_ingest_pipeline_description(config_, make_location_pattern(attempt));
     logger_.debug("[gst] pipeline: " + pipeline_description);
 
-    GstElement* pipeline = gst_parse_launch(pipeline_description.c_str(), &parse_error);
+    GstElement *pipeline = gst_parse_launch(pipeline_description.c_str(), &parse_error);
     if (!pipeline) {
         std::string message = parse_error ? parse_error->message : "unknown gst_parse_launch error";
         if (parse_error) g_error_free(parse_error);
@@ -340,9 +415,21 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
         throw std::runtime_error(redact_rtsp_userinfo("failed to fully create pipeline: " + message));
     }
 
-    GstBus* bus = nullptr;
-    CallbackContext context{config_,        index_,       logger_,    live_sink_, first_buffer_seen_,
-                            first_buffers_, live_frames_, live_drops_};
+    GstBus *bus = nullptr;
+    std::atomic<bool> first_rtp_buffer_seen{false};
+    std::atomic<bool> attempt_first_buffer_seen{false};
+    CallbackContext context{config_,
+                            index_,
+                            logger_,
+                            live_sink_,
+                            attempt,
+                            std::chrono::steady_clock::now(),
+                            first_rtp_buffer_seen,
+                            attempt_first_buffer_seen,
+                            first_buffer_seen_,
+                            first_buffers_,
+                            live_frames_,
+                            live_drops_};
     try {
         configure_source(pipeline, config_);
         connect_callbacks(pipeline, context);
@@ -368,14 +455,14 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
 
     try {
         while (result == AttemptResult::Stopped && running_.load()) {
-            if (!first_buffer_seen_.load() && std::chrono::steady_clock::now() >= startup_deadline) {
+            if (!attempt_first_buffer_seen.load() && std::chrono::steady_clock::now() >= startup_deadline) {
                 pipeline_errors_.fetch_add(1);
                 logger_.error("[ingest] state=pipeline_error channel_id=" + std::to_string(config_.channel_id) +
                               " message=first_buffer_timeout timeout_ms=" + std::to_string(config_.startup_timeout_ms));
                 result = AttemptResult::PipelineError;
                 break;
             }
-            GstMessage* message = gst_bus_timed_pop_filtered(
+            GstMessage *message = gst_bus_timed_pop_filtered(
                 bus, 500 * GST_MSECOND,
                 static_cast<GstMessageType>(GST_MESSAGE_ERROR | GST_MESSAGE_EOS | GST_MESSAGE_ELEMENT));
             if (!message) {
@@ -383,8 +470,8 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
             }
 
             if (GST_MESSAGE_TYPE(message) == GST_MESSAGE_ERROR) {
-                GError* gst_error = nullptr;
-                gchar* debug = nullptr;
+                GError *gst_error = nullptr;
+                gchar *debug = nullptr;
                 gst_message_parse_error(message, &gst_error, &debug);
                 pipeline_errors_.fetch_add(1);
                 logger_.error(redact_rtsp_userinfo(std::string("[ingest] state=pipeline_error channel_id=") +
@@ -409,7 +496,7 @@ ChannelIngest::AttemptResult ChannelIngest::run_attempt(std::uint64_t attempt) {
             gst_element_send_event(pipeline, gst_event_new_eos())) {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
             while (std::chrono::steady_clock::now() < deadline) {
-                GstMessage* message = gst_bus_timed_pop_filtered(
+                GstMessage *message = gst_bus_timed_pop_filtered(
                     bus, 500 * GST_MSECOND,
                     static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR | GST_MESSAGE_ELEMENT));
                 if (!message) continue;

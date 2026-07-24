@@ -43,8 +43,8 @@ struct VmsConfig {
     int latency_ms = 200;
     int segment_seconds = 60;
     int reconnect_delay_ms = 2000;
-    int ingest_startup_timeout_ms = 15000;
-    int channel_start_delay_ms = 5000;
+    int ingest_startup_timeout_ms = 5000;
+    int channel_start_delay_ms = 0;
     std::string live_listen_host = "0.0.0.0";
     int rtsp_port = 0;
     int rtsps_port = 8554;
@@ -106,8 +106,8 @@ void print_usage(const char* program) {
               << "  --latency-ms 200\n"
               << "  --segment-seconds 60\n"
               << "  --reconnect-delay-ms 2000\n"
-              << "  --ingest-startup-timeout-ms 15000\n"
-              << "  --channel-start-delay-ms 5000\n"
+              << "  --ingest-startup-timeout-ms 5000\n"
+              << "  --channel-start-delay-ms 0\n"
               << "  --live-listen-host 0.0.0.0\n"
               << "  --rtsp-port 0 (plain RTSP disabled by default)\n"
               << "  --rtsps-port 8554 (0 disables RTSPS)\n"

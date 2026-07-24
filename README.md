@@ -30,12 +30,15 @@ channel_id=1..4      VMS/DB/client/storage namespace
 
 기본 mapping은 `0:1,1:2,2:3,3:4`이며 `--channel-map CAMERA:VMS,...`로 명시합니다.
 1채널 부하 기준선은 `--channel-map 0:1`로 실행합니다.
-프로세스 시작 시 같은 카메라에 RTSP 연결 4개가 한꺼번에 몰리지 않도록 worker를
-기본 5초 간격으로 시작합니다. 이 값은 실제 Pi에서 GStreamer `rtspsrc` 4개를 동시에
-시작할 때 일부 camera session이 45초 동안 첫 frame을 주지 않은 현상을 회피하기 위해
-정한 임시 운영값입니다. camera·profile별 재검증 후 조정할 수 있으며,
-`--channel-start-delay-ms`로 명시합니다. 이 지연은 최초 시작에만 적용되고 이후
-채널별 reconnect는 서로 독립적으로 동작합니다.
+worker는 기본적으로 지연 없이 시작합니다. 실제 Pi 시험에서 5초 간격 시작과 단독 채널
+시작 모두 간헐적으로 `DESCRIBE` 이후 첫 RTP가 오지 않는 현상이 재현됐고, 더 늦게
+시작한 다른 채널은 즉시 streaming되어 시작 간격이 원인이 아님을 확인했습니다.
+`--channel-start-delay-ms`는 camera별 실장 조정을 위해 유지하지만 기본값은 `0`입니다.
+지연을 지정해도 최초 시작에만 적용되고 채널별 reconnect는 서로 독립적으로 동작합니다.
+정상 RTSP 세션은 실제 Pi에서 약 0.5~0.8초에 첫 RTP를 전달했지만, 간헐적으로
+`DESCRIBE` 이후 RTP가 오지 않는 세션은 15~45초를 기다려도 회복되지 않고 재접속 직후
+정상화됐습니다. 따라서 첫 buffer timeout 기본값은 5초이며 reconnect 지연은 2초입니다.
+종료 시 camera session 정리를 위해 `rtspsrc`의 TEARDOWN 대기시간은 2초로 설정합니다.
 
 ```text
 /mnt/vms-storage/
@@ -115,7 +118,7 @@ printf '%s\n' "$CAMERA_PASSWORD" | ./build/rpi_vms \
   --codec h264 \
   --segment-seconds 60 \
   --reconnect-delay-ms 2000 \
-  --channel-start-delay-ms 5000 \
+  --channel-start-delay-ms 0 \
   --require-storage-mount \
   --rtsp-port 0 \
   --rtsps-port 8554 \
